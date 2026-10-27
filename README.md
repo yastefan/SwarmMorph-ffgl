@@ -1,34 +1,90 @@
-# SwarmMorph-ffgl
+# SwarmMorph
 
-A native FFGL source plugin for Resolume Arena/Avenue. It turns up to eight
-`.obj` meshes into a GPU particle swarm. When you switch the target mesh,
-every particle flies to its point on the new surface.
+**A particle swarm for Resolume that morphs between your 3D models.**
 
-- Up to 1,048,576 particles, simulated and rendered entirely on the GPU
-- OpenGL 4.1 core, so one code base runs on macOS and Windows
-- Meshes are loaded on a background thread, so switching files mid-show doesn't drop frames
-- Polygon meshes are sampled uniformly by surface area; OBJ files without faces are used as point clouds
-- Animated meshes as OBJ sequences (one file per frame, e.g. from Blender); particles ride along with the surface
+Load up to eight `.obj` meshes, and SwarmMorph turns them into a cloud of up
+to one million glowing particles. Switch the target mesh and the whole swarm
+takes off, swirls through the air and lands on the new shape. Animated meshes
+from Blender work too: the particles ride along with the moving surface.
 
-## Installing
+SwarmMorph is a native FFGL source plugin for **Resolume Arena and Avenue** on
+**macOS and Windows**. Everything runs on the GPU, so it stays smooth at full
+HD and beyond.
 
-Download a zip from the
-[Releases page](https://github.com/yastefan/SwarmMorph-ffgl/releases):
-pick a versioned release, or **Latest build from main** for the newest state.
-Copy the plugin into Resolume's extra effects folder, then restart Resolume:
+- Morph between up to 8 models at the push of a MIDI pad or on the beat
+- 10,000 to 1,048,576 particles
+- Animated meshes as OBJ sequences, e.g. exported from Blender
+- Wind, gusts, vortex and explode forces that bend the shape and let it spring back
+- Swirl, shimmer, scatter, speed glow and a free-spinning camera
+- Meshes load in the background, so loading a new file mid-show doesn't drop frames
 
-| OS      | File                | Folder                                         |
-|---------|---------------------|------------------------------------------------|
-| Windows | `SwarmMorph.dll`    | `Documents\Resolume Arena\Extra Effects`       |
-| macOS   | `SwarmMorph.bundle` | `~/Documents/Resolume Arena/Extra Effects`     |
+## Download and install
 
-On macOS, remove the download quarantine flag first:
+1. Download the zip for your system from the
+   [Releases page](https://github.com/yastefan/SwarmMorph-ffgl/releases).
+   Pick the newest versioned release, or **Latest build from main** for the
+   very latest changes.
+2. Quit Resolume.
+3. Copy the plugin from the zip into Resolume's **Extra Effects** folder:
 
-```bash
-xattr -dr com.apple.quarantine SwarmMorph.bundle
-```
+   | System  | File from the zip   | Folder |
+   |---------|---------------------|--------|
+   | Windows | `SwarmMorph.dll`    | `Documents\Resolume Arena\Extra Effects` |
+   | macOS   | `SwarmMorph.bundle` | `Documents/Resolume Arena/Extra Effects` |
 
-SwarmMorph shows up under **Sources**.
+   For Avenue, use `Resolume Avenue` instead of `Resolume Arena` in the path.
+4. **macOS only:** macOS blocks plugins downloaded from the internet. Open
+   Terminal in that folder and run:
+
+   ```bash
+   xattr -dr com.apple.quarantine SwarmMorph.bundle
+   ```
+
+5. Start Resolume. SwarmMorph appears in the **Sources** tab.
+
+Requirements: Resolume Arena or Avenue 7 (developed with Arena 7.28) and a
+graphics card with OpenGL 4.1, which every Mac and Windows GPU of the last
+decade has. Macs with Intel or Apple Silicon are both supported.
+
+## Your first swarm
+
+1. Drag **SwarmMorph** from the Sources tab onto an empty clip and trigger it.
+   You'll see a sphere of particles: that's the placeholder until you load a
+   model.
+2. In the clip's parameters, open the **Meshes** group and choose an `.obj`
+   file for **Mesh 1**, another one for **Mesh 2**, and so on.
+3. Change **Target** to 2, and watch the swarm fly from the first model to
+   the second.
+4. Now play: raise **Turbulence** for wilder flights, lower **Attraction** for
+   slow, dreamy transitions, push **Wind X** for a gust, hit **Scatter** for
+   an explosion.
+
+No models at hand? The [`examples/meshes`](examples/meshes) folder of this
+repository has a torus, a knot, a cube and a wave to start with.
+
+## Ideas for live shows
+
+- **Morph on the beat:** use Resolume's BPM sync to animate **Target**, or
+  map **Next** to a MIDI pad to step through your loaded models one by one.
+- **Hit the kick:** map **Scatter** to a pad or an audio-reactive trigger for
+  a burst that settles back into the shape.
+- **Fader weather:** put **Wind X/Y/Z**, **Vortex** and **Explode** on faders.
+  All of them rest at the centre, so the shape stays calm until you move them.
+- **Logos and lettering:** export a logo or 3D text from Blender as `.obj`
+  and let the swarm assemble it.
+- **Layer it:** SwarmMorph's background is transparent and the particles are
+  drawn additively, so it sits nicely on top of other clips.
+
+## Getting models
+
+Any `.obj` file works: exports from Blender, Cinema 4D, Houdini, Maya, or
+models downloaded from the web. The polygon count hardly matters, since the
+particles are spread evenly across the surface rather than placed on the
+vertices. Every model is centred and scaled to the same size; turn
+**Normalize** off to keep the original size and position.
+
+From Blender: select your object, then **File → Export → Wavefront (.obj)**.
+Materials and textures are ignored; only the shape counts.
 
 ## Parameters
 
@@ -90,7 +146,20 @@ rebuild their mesh every frame (fluids, remeshing) don't, and frames with a
 different vertex count are skipped with a warning in Resolume's log. The
 whole animation is normalized as one, so it doesn't jitter in size.
 
-## Building
+## Troubleshooting
+
+- **SwarmMorph doesn't show up in Sources:** check that the file sits directly
+  in the Extra Effects folder and restart Resolume. On macOS, run the `xattr`
+  command from the install steps.
+- **A model doesn't load, or nothing shows:** Resolume's log names the file
+  and the reason; look for lines starting with `SwarmMorph`. On macOS the log
+  is `~/Library/Logs/Resolume Arena/Resolume Arena log.txt`.
+- **It stutters:** lower **Particles**. Integrated laptop GPUs handle a few
+  hundred thousand particles; a dedicated graphics card handles the full million.
+
+## For developers
+
+### Building
 
 Clone with the FFGL SDK submodule:
 
@@ -112,7 +181,7 @@ cmake -S . -B build -A x64
 cmake --build build --config Release
 ```
 
-## Development and releases
+### Development and releases
 
 GitHub Actions builds a universal macOS bundle and an x64 Windows DLL:
 
@@ -132,7 +201,7 @@ GitHub Actions builds a universal macOS bundle and an x64 Windows DLL:
    publishes the release with notes generated from the merged pull requests.
    The plugin reports the major and minor version to Resolume.
 
-## Testing without Resolume (macOS)
+### Testing without Resolume (macOS)
 
 `swarmmorph-harness` loads the built plugin through `plugMain` like a host,
 renders offscreen on an OpenGL 4.1 core context and writes PNG frames:
@@ -152,7 +221,7 @@ in a non-default state, which is the most common reason plugins misbehave in
 Resolume. Run `--help` for all options, `--list` for the parameter names, and
 `--throughput` for performance measurements.
 
-## How it works
+### How it works
 
 - `src/MeshSampler.cpp` parses OBJ files and binds one million random,
   area-weighted surface spots per mesh (a triangle's three vertices plus
