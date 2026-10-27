@@ -50,6 +50,16 @@ SwarmMorph shows up under **Sources**.
 |        | Brightness       | Additive intensity |
 | Camera | Spin             | Continuous rotation, centre = still |
 |        | Rotate X/Y, Zoom | Camera orientation and distance |
+| Forces | Wind X/Y/Z       | Constant force along each axis, centre = none. Wind Y below centre acts as gravity. |
+|        | Gusts            | Waves of stronger and weaker wind travelling through the shape |
+|        | Vortex           | Twist around the vertical axis, either direction |
+|        | Explode          | Push outward from the centre; below centre pulls inward |
+
+Forces work against the attraction: the shape settles into a stretched,
+displaced or twisted version of itself and springs back when the force is
+released. Lower **Attraction** to let the forces win. Particles react with
+individual strength, so wind leaves streaks. Forces act in the mesh's own
+axes, so with **Spin** on, the wind direction turns with the object.
 
 ## Building
 

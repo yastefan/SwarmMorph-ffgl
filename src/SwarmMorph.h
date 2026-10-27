@@ -95,6 +95,12 @@ private:
 	float rotateX        = 0.5f;
 	float rotateY        = 0.5f;
 	float zoom           = 0.5f;
+	float windX          = 0.5f;
+	float windY          = 0.5f;
+	float windZ          = 0.5f;
+	float gusts          = 0.3f;
+	float vortex         = 0.5f;
+	float radial         = 0.5f;
 	bool normalizeMeshes = true;
 	bool nextPressed     = false;
 	bool scatterPressed  = false;

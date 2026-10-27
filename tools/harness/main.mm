@@ -158,6 +158,7 @@ void Usage()
 		"  --at FRAME NAME=VALUE  set a parameter at a frame (repeatable)\n"
 		"  --load-wait SEC      real time to wait for mesh loading (default: 2)\n"
 		"  --throughput         don't sync after each frame; only the wall time is meaningful\n"
+		"  --stale-gl-error     leave a GL error pending before instantiating, like Resolume sometimes does\n"
 		"  --list               print the plugin's parameters and exit\n" );
 }
 
@@ -181,6 +182,7 @@ int main( int argc, char** argv )
 		double loadWait = 2.0;
 		bool listOnly   = false;
 		bool throughput = false;
+		bool staleError = false;
 		std::vector< Action > actions;
 
 		for( int i = 1; i < argc; ++i )
@@ -201,6 +203,7 @@ int main( int argc, char** argv )
 			else if( arg == "--load-wait" ) loadWait = std::stod( next() );
 			else if( arg == "--list" ) listOnly = true;
 			else if( arg == "--throughput" ) throughput = true;
+			else if( arg == "--stale-gl-error" ) staleError = true;
 			else if( arg == "--mesh" )
 			{
 				std::string slot = next();
@@ -274,6 +277,9 @@ int main( int argc, char** argv )
 		if( glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
 			Fail( "framebuffer incomplete" );
 		glViewport( 0, 0, width, height );
+
+		if( staleError )
+			glBindTexture( GL_TEXTURE_2D, 0xBAD );// unknown name in core profile: GL_INVALID_OPERATION, left unread
 
 		FFGLViewportStruct viewport = { 0, 0, (GLuint)width, (GLuint)height };
 		FFInstanceID instance       = Call( FF_INSTANTIATE_GL, FromPointer( &viewport ) ).PointerValue;

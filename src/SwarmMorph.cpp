@@ -54,6 +54,14 @@ enum ParamID
 	PID_ROTATE_X,
 	PID_ROTATE_Y,
 	PID_ZOOM,
+
+	// Appended so the IDs above stay stable for saved compositions.
+	PID_WIND_X,
+	PID_WIND_Y,
+	PID_WIND_Z,
+	PID_GUSTS,
+	PID_VORTEX,
+	PID_RADIAL,
 };
 
 const float kPi              = 3.14159265358979f;
@@ -86,6 +94,21 @@ float SpinValue( float v ) { return ( v - 0.5f ); }// revolutions per second
 float AngleValue( float v ) { return ( v - 0.5f ) * 360.0f; }
 float DistanceValue( float v ) { return 6.0f - 4.5f * v; }
 
+// Centred sliders: 0.5 is no force. The small dead zone makes it easy to hit
+// zero exactly with a MIDI fader.
+float CentredForce( float v, float maxForce )
+{
+	float centred = ( v - 0.5f ) * 2.0f;
+	const float deadZone = 0.02f;
+	if( std::fabs( centred ) < deadZone )
+		return 0.0f;
+	float sign = centred < 0.0f ? -1.0f : 1.0f;
+	return sign * ( std::fabs( centred ) - deadZone ) / ( 1.0f - deadZone ) * maxForce;
+}
+float WindValue( float v ) { return CentredForce( v, 10.0f ); }
+float VortexValue( float v ) { return CentredForce( v, 6.0f ); }
+float RadialValue( float v ) { return CentredForce( v, 6.0f ); }
+
 bool IsMeshParam( unsigned int index )
 {
 	return index >= PID_MESH_FIRST && index <= PID_MESH_LAST;
@@ -94,6 +117,8 @@ bool IsMeshParam( unsigned int index )
 
 SwarmMorph::SwarmMorph()
 {
+	// The SDK leaves hostTime uninitialised until the host's first SetTime call.
+	hostTime = 0.0;
 	SetMinInputs( 0 );
 	SetMaxInputs( 0 );
 
@@ -136,6 +161,15 @@ SwarmMorph::SwarmMorph()
 	for( unsigned int id = PID_SPIN; id <= PID_ZOOM; ++id )
 		SetParamGroup( id, "Camera" );
 
+	SetParamInfof( PID_WIND_X, "Wind X", FF_TYPE_STANDARD );
+	SetParamInfof( PID_WIND_Y, "Wind Y", FF_TYPE_STANDARD );
+	SetParamInfof( PID_WIND_Z, "Wind Z", FF_TYPE_STANDARD );
+	SetParamInfof( PID_GUSTS, "Gusts", FF_TYPE_STANDARD );
+	SetParamInfof( PID_VORTEX, "Vortex", FF_TYPE_STANDARD );
+	SetParamInfof( PID_RADIAL, "Explode", FF_TYPE_STANDARD );
+	for( unsigned int id = PID_WIND_X; id <= PID_RADIAL; ++id )
+		SetParamGroup( id, "Forces" );
+
 }
 
 SwarmMorph::~SwarmMorph() = default;
@@ -159,10 +193,22 @@ FFResult SwarmMorph::DeInitGL()
 
 bool SwarmMorph::CreateGLResources()
 {
+	// The host can hand us a context with its own error still pending (Resolume
+	// does on the first instantiation). Drain it so we only see our own errors.
+	while( glGetError() != GL_NO_ERROR )
+	{
+	}
+
 	if( !updateShader.Compile( swarm::kFullscreenVS, swarm::kUpdateFS ) )
+	{
+		FFGLLog::LogToHost( "SwarmMorph: update shader failed to compile" );
 		return false;
+	}
 	if( !renderShader.Compile( swarm::kRenderVS, swarm::kRenderFS ) )
+	{
+		FFGLLog::LogToHost( "SwarmMorph: render shader failed to compile" );
 		return false;
+	}
 
 	std::vector< float > sphere = swarm::SampleSphere( kMaxParticles, 7 );
 	fallbackTexture             = CreateFloatTexture( GL_RGB32F, GL_RGB, sphere.data() );
@@ -225,7 +271,15 @@ bool SwarmMorph::CreateGLResources()
 		if( !slots[ i ].path.empty() && !slots[ i ].pending )
 			StartLoad( i, slots[ i ].path );
 	}
-	return glGetError() == GL_NO_ERROR;
+	GLenum error = glGetError();
+	if( error != GL_NO_ERROR )
+	{
+		char message[ 64 ];
+		snprintf( message, sizeof( message ), "SwarmMorph: GL error 0x%04X while creating resources", error );
+		FFGLLog::LogToHost( message );
+		return false;
+	}
+	return true;
 }
 
 void SwarmMorph::ReleaseGLResources()
@@ -350,6 +404,8 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 		deltaTime = static_cast< float >( ( hostTime - lastTime ) / 1000.0 );
 	lastTime  = hostTime;
 	// Big jumps (clip retriggered, host stalled) would make the springs explode.
+	if( !std::isfinite( deltaTime ) )
+		deltaTime = 0.0f;
 	deltaTime = std::min( std::max( deltaTime, 0.0f ), 1.0f / 20.0f );
 	simTime += deltaTime;
 	spinAngle += SpinValue( spin ) * 2.0f * kPi * deltaTime;
@@ -380,6 +436,10 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targetTexture )
 	updateShader.Set( "uShimmer", ShimmerValue( shimmer ) );
 	updateShader.Set( "uNoiseScale", NoiseScaleValue( noiseScale ) );
 	updateShader.Set( "uScatter", scatterPending );
+	updateShader.Set( "uWind", WindValue( windX ), WindValue( windY ), WindValue( windZ ) );
+	updateShader.Set( "uGusts", gusts );
+	updateShader.Set( "uVortex", VortexValue( vortex ) );
+	updateShader.Set( "uRadial", RadialValue( radial ) );
 	updateShader.Set( "uPositions", 0 );
 	updateShader.Set( "uVelocities", 1 );
 	updateShader.Set( "uTargets", 2 );
@@ -487,6 +547,12 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_ROTATE_X: rotateX = value; break;
 	case PID_ROTATE_Y: rotateY = value; break;
 	case PID_ZOOM: zoom = value; break;
+	case PID_WIND_X: windX = value; break;
+	case PID_WIND_Y: windY = value; break;
+	case PID_WIND_Z: windZ = value; break;
+	case PID_GUSTS: gusts = value; break;
+	case PID_VORTEX: vortex = value; break;
+	case PID_RADIAL: radial = value; break;
 	default:
 		return FF_FAIL;
 	}
@@ -518,6 +584,12 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_ROTATE_X: return rotateX;
 	case PID_ROTATE_Y: return rotateY;
 	case PID_ZOOM: return zoom;
+	case PID_WIND_X: return windX;
+	case PID_WIND_Y: return windY;
+	case PID_WIND_Z: return windZ;
+	case PID_GUSTS: return gusts;
+	case PID_VORTEX: return vortex;
+	case PID_RADIAL: return radial;
 	default: return 0.0f;
 	}
 }
@@ -555,6 +627,11 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	case PID_ROTATE_X: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( rotateX ) ); return buffer;
 	case PID_ROTATE_Y: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( rotateY ) ); return buffer;
 	case PID_ZOOM: snprintf( buffer, sizeof( buffer ), "%.2f", DistanceValue( zoom ) ); return buffer;
+	case PID_WIND_X: snprintf( buffer, sizeof( buffer ), "%+.1f", WindValue( windX ) ); return buffer;
+	case PID_WIND_Y: snprintf( buffer, sizeof( buffer ), "%+.1f", WindValue( windY ) ); return buffer;
+	case PID_WIND_Z: snprintf( buffer, sizeof( buffer ), "%+.1f", WindValue( windZ ) ); return buffer;
+	case PID_VORTEX: snprintf( buffer, sizeof( buffer ), "%+.1f", VortexValue( vortex ) ); return buffer;
+	case PID_RADIAL: snprintf( buffer, sizeof( buffer ), "%+.1f", RadialValue( radial ) ); return buffer;
 	default: return CFFGLPlugin::GetParameterDisplay( index );
 	}
 }

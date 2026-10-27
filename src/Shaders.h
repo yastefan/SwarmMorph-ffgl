@@ -37,6 +37,10 @@ uniform float uTurbulence;
 uniform float uShimmer;
 uniform float uNoiseScale;
 uniform float uScatter;
+uniform vec3 uWind;
+uniform float uGusts;
+uniform float uVortex;
+uniform float uRadial;
 
 layout( location = 0 ) out vec4 oPosition;
 layout( location = 1 ) out vec4 oVelocity;
@@ -77,6 +81,24 @@ void main()
 	float swirlAmount = uShimmer + uTurbulence * min( distance, 1.5 );
 	vec3 swirl = flow( position * uNoiseScale + seed * 0.5, uTime ) * swirlAmount;
 	vec3 acceleration = strength * ( toTarget + swirl );
+
+	// External forces. Against the spring they settle into an offset of
+	// force / strength, so they smear and stretch the shape instead of blowing
+	// it away. Each particle reacts differently, which turns wind into streaks.
+	float response = 0.5 + hash( seed * 23.1 );
+	float windSpeed = length( uWind );
+	vec3 externalForce = uWind;
+	if( windSpeed > 0.0 )
+	{
+		// Gusts travel through the shape along the wind direction.
+		float wave = 0.5 + 0.5 * sin( dot( position, uWind / windSpeed ) * 2.0 - uTime * 3.0 + seed * 2.0 );
+		externalForce *= mix( 1.0, 2.0 * wave, uGusts );
+	}
+	externalForce += uVortex * vec3( -position.z, 0.0, position.x );
+	float radius = length( position );
+	if( radius > 1e-4 )
+		externalForce += uRadial * position / radius;
+	acceleration += externalForce * response;
 
 	if( uScatter > 0.0 )
 	{
