@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "SwarmMorph.h"
 #include <ffglex/FFGLScopedFBOBinding.h>
 #include <algorithm>
@@ -17,8 +18,8 @@ static CFFGLPluginInfo PluginInfo(
 	"SwarmMorph",                                              // Plugin name
 	2,                                                         // API major version number
 	1,                                                         // API minor version number
-	0,                                                         // Plugin major version number
-	1,                                                         // Plugin minor version number
+	SWARMMORPH_VERSION_MAJOR,                                  // Plugin major version number
+	SWARMMORPH_VERSION_MINOR,                                  // Plugin minor version number
 	FF_SOURCE,                                                 // Plugin type
 	"Particle swarm that morphs between OBJ meshes",           // Plugin description
 	"SwarmMorph - github.com/yastefan/SwarmMorph-ffgl"         // About

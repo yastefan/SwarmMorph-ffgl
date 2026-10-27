@@ -11,9 +11,10 @@ every particle flies to its point on the new surface.
 
 ## Installing
 
-Download the latest build from the
-[Actions tab](https://github.com/yastefan/SwarmMorph-ffgl/actions) (or a release) and copy the plugin into
-Resolume's extra effects folder, then restart Resolume:
+Download a zip from the
+[Releases page](https://github.com/yastefan/SwarmMorph-ffgl/releases):
+pick a versioned release, or **Latest build from main** for the newest state.
+Copy the plugin into Resolume's extra effects folder, then restart Resolume:
 
 | OS      | File                | Folder                                         |
 |---------|---------------------|------------------------------------------------|
@@ -83,8 +84,25 @@ cmake -S . -B build -A x64
 cmake --build build --config Release
 ```
 
-GitHub Actions builds both platforms on every push (universal macOS binary
-and x64 DLL). Pushing a `v*` tag publishes a release with both zips.
+## Development and releases
+
+GitHub Actions builds a universal macOS bundle and an x64 Windows DLL:
+
+1. Work on a branch and open a pull request against `main`. The workflow
+   builds both platforms on the pull request; merge once it is green.
+2. Every push to `main` replaces the pre-release **Latest build from main**
+   (tag `latest-build`) with fresh zips.
+3. For a versioned release, bump `project(SwarmMorph VERSION x.y.z)` in
+   `CMakeLists.txt` on `main`, then tag that commit:
+
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+   The workflow refuses tags that don't match the project version, and
+   publishes the release with notes generated from the merged pull requests.
+   The plugin reports the major and minor version to Resolume.
 
 ## Testing without Resolume (macOS)
 
@@ -122,3 +140,12 @@ about 15× slower than the fragment pass, and attribute-less point drawing
 (`gl_VertexID` only) about 4× slower than drawing from a static index buffer.
 The current design avoids both: 270k particles take about 2 ms per frame and
 1M about 7 ms on that GPU.
+
+## License
+
+SwarmMorph is free software under the
+[GNU General Public License v3.0 or later](LICENSE).
+
+It builds on the [FFGL SDK](https://github.com/resolume/ffgl) (BSD 3-Clause)
+and, on Windows, links [GLEW](https://glew.sourceforge.net/) (BSD/MIT).
+Their license texts ship in the `licenses` folder of every release zip.

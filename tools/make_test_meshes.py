@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Writes a few simple OBJ meshes for testing SwarmMorph into examples/meshes."""
 import math
 import os

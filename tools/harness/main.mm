@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Offscreen FFGL host for testing SwarmMorph without Resolume.
 //
 // Loads the plugin bundle, drives it through the same plugMain calls a host

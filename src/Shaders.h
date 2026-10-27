@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 // All shaders target GLSL 4.10 core, the highest version macOS offers, so the

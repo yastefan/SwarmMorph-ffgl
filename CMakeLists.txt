@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.20)
 project(SwarmMorph VERSION 0.1.0 LANGUAGES C CXX)
 
@@ -42,6 +43,10 @@ add_library(SwarmMorph MODULE
 )
 target_include_directories(SwarmMorph PRIVATE src ${FFGL_DIR}/source/lib)
 target_link_libraries(SwarmMorph PRIVATE swarmmorph-mesh)
+# The plugin reports the project version to the host.
+target_compile_definitions(SwarmMorph PRIVATE
+    SWARMMORPH_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    SWARMMORPH_VERSION_MINOR=${PROJECT_VERSION_MINOR})
 # FFGL_DEBUG makes the SDK assert that the plugin leaves the GL context in its default state.
 target_compile_definitions(SwarmMorph PRIVATE $<$<CONFIG:Debug>:DEBUG>)
 
