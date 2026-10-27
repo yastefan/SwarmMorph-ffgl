@@ -2,6 +2,7 @@
 #include "SwarmMorph.h"
 #include <ffglex/FFGLScopedFBOBinding.h>
 #include <algorithm>
+#include <initializer_list>
 #include <cmath>
 #include <cstdio>
 #include <random>
@@ -68,6 +69,10 @@ enum ParamID
 	PID_PING_PONG,
 	PID_RESTART,
 	PID_SEQUENCES,
+
+	PID_SURFACE_FLOW,
+	PID_HOVER,
+	PID_FLOW_SPEED,
 };
 
 const float kPi              = 3.14159265358979f;
@@ -87,6 +92,39 @@ GLuint CreateTexture( GLint internalFormat, GLenum format, GLenum type, int widt
 	glTexImage2D( GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, pixels );
 	return texture;
 }
+
+// Binds 2D textures to units 0, 1, 2, ... and unbinds every one of them when
+// it goes out of scope. The SDK's ScopedSamplerActivation resets the active
+// unit to 0 on destruction, so stacking several of them unbinds the wrong units.
+class ScopedTextureUnits
+{
+public:
+	ScopedTextureUnits( std::initializer_list< GLuint > textures ) :
+		count( static_cast< GLuint >( textures.size() ) )
+	{
+		GLuint unit = 0;
+		for( GLuint texture : textures )
+		{
+			glActiveTexture( GL_TEXTURE0 + unit++ );
+			glBindTexture( GL_TEXTURE_2D, texture );
+		}
+		glActiveTexture( GL_TEXTURE0 );
+	}
+	~ScopedTextureUnits()
+	{
+		for( GLuint unit = 0; unit < count; ++unit )
+		{
+			glActiveTexture( GL_TEXTURE0 + unit );
+			glBindTexture( GL_TEXTURE_2D, 0 );
+		}
+		glActiveTexture( GL_TEXTURE0 );
+	}
+	ScopedTextureUnits( const ScopedTextureUnits& ) = delete;
+	ScopedTextureUnits& operator=( const ScopedTextureUnits& ) = delete;
+
+private:
+	GLuint count;
+};
 
 // Particle-sized float texture: one texel per particle.
 GLuint CreateFloatTexture( GLint internalFormat, GLenum format, const float* pixels )
@@ -121,6 +159,9 @@ float WindValue( float v ) { return CentredForce( v, 10.0f ); }
 float VortexValue( float v ) { return CentredForce( v, 6.0f ); }
 float RadialValue( float v ) { return CentredForce( v, 6.0f ); }
 float AnimSpeedValue( float v ) { return 3.0f * v; }
+float SurfaceFlowValue( float v ) { return 0.4f * v; }
+float HoverValue( float v ) { return 0.25f * v; }
+float FlowSpeedValue( float v ) { return 2.0f * v; }
 
 bool IsMeshParam( unsigned int index )
 {
@@ -189,6 +230,12 @@ SwarmMorph::SwarmMorph()
 	SetParamInfo( PID_SEQUENCES, "OBJ Sequences", FF_TYPE_BOOLEAN, detectSequences );
 	for( unsigned int id = PID_ANIM_SPEED; id <= PID_SEQUENCES; ++id )
 		SetParamGroup( id, "Animation" );
+
+	SetParamInfof( PID_SURFACE_FLOW, "Surface Flow", FF_TYPE_STANDARD );
+	SetParamInfof( PID_HOVER, "Hover", FF_TYPE_STANDARD );
+	SetParamInfof( PID_FLOW_SPEED, "Flow Speed", FF_TYPE_STANDARD );
+	for( unsigned int id = PID_SURFACE_FLOW; id <= PID_FLOW_SPEED; ++id )
+		SetParamGroup( id, "Swarm" );
 
 }
 
@@ -337,10 +384,11 @@ void SwarmMorph::ReleaseSlotGL( Slot& slot )
 {
 	glDeleteFramebuffers( 1, &slot.fbo );
 	glDeleteTextures( 1, &slot.texture );
+	glDeleteTextures( 1, &slot.normals );
 	glDeleteTextures( 1, &slot.vertexTexture );
 	glDeleteTextures( 1, &slot.bindIndices );
 	glDeleteTextures( 1, &slot.bindWeights );
-	slot.fbo = slot.texture = slot.vertexTexture = slot.bindIndices = slot.bindWeights = 0;
+	slot.fbo = slot.texture = slot.normals = slot.vertexTexture = slot.bindIndices = slot.bindWeights = 0;
 }
 
 void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
@@ -383,7 +431,8 @@ void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
 				}
 				else
 				{
-					job->points = swarm::EvaluateBinding( binding, sequence.frames[ 0 ] );
+					job->points  = swarm::EvaluateBinding( binding, sequence.frames[ 0 ] );
+					job->normals = swarm::EvaluateNormals( binding, sequence.frames[ 0 ] );
 				}
 			}
 		}
@@ -420,6 +469,7 @@ void SwarmMorph::UploadFinishedLoads()
 		if( job->frames.empty() )
 		{
 			slot.texture = CreateFloatTexture( GL_RGB32F, GL_RGB, job->points.data() );
+			slot.normals = CreateFloatTexture( GL_RGB32F, GL_RGB, job->normals.data() );
 		}
 		else
 		{
@@ -441,10 +491,14 @@ void SwarmMorph::UploadAnimation( Slot& slot, LoadJob& job )
 	slot.bindIndices   = CreateTexture( GL_RGBA32UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT, kTextureWidth, kTextureWidth, job.binding.indices.data() );
 	slot.bindWeights   = CreateFloatTexture( GL_RGBA32F, GL_RGBA, job.binding.weights.data() );
 	slot.texture       = CreateFloatTexture( GL_RGBA32F, GL_RGBA, nullptr );
+	slot.normals       = CreateFloatTexture( GL_RGBA32F, GL_RGBA, nullptr );
 
 	glGenFramebuffers( 1, &slot.fbo );
 	ScopedFBOBinding fboBinding( slot.fbo, ScopedFBOBinding::RB_REVERT );
 	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot.texture, 0 );
+	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, slot.normals, 0 );
+	const GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+	glDrawBuffers( 2, drawBuffers );
 
 	slot.playhead      = 0.0;
 	slot.evaluatedAt   = -1.0;
@@ -502,12 +556,7 @@ void SwarmMorph::AdvanceAnimation( float deltaTime )
 	skinShader.Set( "uBindIndices", 1 );
 	skinShader.Set( "uBindWeights", 2 );
 	skinShader.Set( "uVertexTextureWidth", kVertexTextureWidth );
-	ScopedSamplerActivation sampler0( 0 );
-	Scoped2DTextureBinding vertices( slot.vertexTexture );
-	ScopedSamplerActivation sampler1( 1 );
-	Scoped2DTextureBinding indices( slot.bindIndices );
-	ScopedSamplerActivation sampler2( 2 );
-	Scoped2DTextureBinding weights( slot.bindWeights );
+	ScopedTextureUnits textures( { slot.vertexTexture, slot.bindIndices, slot.bindWeights } );
 	ScopedVAOBinding vaoBinding( emptyVAO );
 	glDrawArrays( GL_TRIANGLES, 0, 3 );
 	glViewport( currentViewport.x, currentViewport.y, currentViewport.width, currentViewport.height );
@@ -529,7 +578,7 @@ void SwarmMorph::SelectNextLoadedSlot()
 	}
 }
 
-GLuint SwarmMorph::CurrentTargetTexture()
+void SwarmMorph::CurrentTarget( GLuint& targets, GLuint& normals )
 {
 	// An empty or still-loading slot keeps the swarm heading where it was.
 	int previous = activeSlot;
@@ -539,7 +588,17 @@ GLuint SwarmMorph::CurrentTargetTexture()
 		activeSlot = -1;
 	if( activeSlot != previous && activeSlot >= 0 && restartOnSwitch )
 		slots[ activeSlot ].playhead = 0.0;
-	return activeSlot >= 0 ? slots[ activeSlot ].texture : fallbackTexture;
+
+	if( activeSlot >= 0 )
+	{
+		targets = slots[ activeSlot ].texture;
+		normals = slots[ activeSlot ].normals;
+	}
+	else
+	{
+		// On the unit sphere, the position is the normal.
+		targets = normals = fallbackTexture;
+	}
 }
 
 int SwarmMorph::ParticleCount() const
@@ -564,14 +623,16 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	spinAngle += SpinValue( spin ) * 2.0f * kPi * deltaTime;
 
 	UploadFinishedLoads();
-	GLuint target = CurrentTargetTexture();
+	noiseTime += deltaTime * FlowSpeedValue( flowSpeed );
+	GLuint targets, normals;
+	CurrentTarget( targets, normals );
 	AdvanceAnimation( deltaTime );
-	Simulate( deltaTime, target );
+	Simulate( deltaTime, targets, normals );
 	Render();
 	return FF_SUCCESS;
 }
 
-void SwarmMorph::Simulate( float deltaTime, GLuint targetTexture )
+void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals )
 {
 	const StateBuffer& source = state[ front ];
 	const StateBuffer& dest   = state[ 1 - front ];
@@ -598,14 +659,13 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targetTexture )
 	updateShader.Set( "uPositions", 0 );
 	updateShader.Set( "uVelocities", 1 );
 	updateShader.Set( "uTargets", 2 );
+	updateShader.Set( "uNormals", 3 );
+	updateShader.Set( "uNoiseTime", noiseTime );
+	updateShader.Set( "uSurfaceFlow", SurfaceFlowValue( surfaceFlow ) );
+	updateShader.Set( "uHover", HoverValue( hover ) );
 	scatterPending = 0.0f;
 
-	ScopedSamplerActivation sampler0( 0 );
-	Scoped2DTextureBinding positions( source.positions );
-	ScopedSamplerActivation sampler1( 1 );
-	Scoped2DTextureBinding velocities( source.velocities );
-	ScopedSamplerActivation sampler2( 2 );
-	Scoped2DTextureBinding targets( targetTexture );
+	ScopedTextureUnits textures( { source.positions, source.velocities, targets, normals } );
 
 	ScopedVAOBinding vaoBinding( emptyVAO );
 	glDrawArrays( GL_TRIANGLES, 0, 3 );
@@ -643,10 +703,7 @@ void SwarmMorph::Render()
 	renderShader.Set( "uVelocities", 1 );
 	renderShader.Set( "uTextureWidth", kTextureWidth );
 
-	ScopedSamplerActivation sampler0( 0 );
-	Scoped2DTextureBinding positions( state[ front ].positions );
-	ScopedSamplerActivation sampler1( 1 );
-	Scoped2DTextureBinding velocities( state[ front ].velocities );
+	ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities } );
 
 	ScopedVAOBinding vaoBinding( indexVAO );
 	glEnable( GL_PROGRAM_POINT_SIZE );
@@ -709,6 +766,9 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_VORTEX: vortex = value; break;
 	case PID_RADIAL: radial = value; break;
 	case PID_ANIM_SPEED: animSpeed = value; break;
+	case PID_SURFACE_FLOW: surfaceFlow = value; break;
+	case PID_HOVER: hover = value; break;
+	case PID_FLOW_SPEED: flowSpeed = value; break;
 	case PID_PING_PONG: pingPong = value > 0.5f; break;
 	case PID_RESTART: restartOnSwitch = value > 0.5f; break;
 	case PID_SEQUENCES:
@@ -758,6 +818,9 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_VORTEX: return vortex;
 	case PID_RADIAL: return radial;
 	case PID_ANIM_SPEED: return animSpeed;
+	case PID_SURFACE_FLOW: return surfaceFlow;
+	case PID_HOVER: return hover;
+	case PID_FLOW_SPEED: return flowSpeed;
 	case PID_PING_PONG: return pingPong ? 1.0f : 0.0f;
 	case PID_RESTART: return restartOnSwitch ? 1.0f : 0.0f;
 	case PID_SEQUENCES: return detectSequences ? 1.0f : 0.0f;
@@ -804,6 +867,7 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	case PID_VORTEX: snprintf( buffer, sizeof( buffer ), "%+.1f", VortexValue( vortex ) ); return buffer;
 	case PID_RADIAL: snprintf( buffer, sizeof( buffer ), "%+.1f", RadialValue( radial ) ); return buffer;
 	case PID_ANIM_SPEED: snprintf( buffer, sizeof( buffer ), "%.2fx", AnimSpeedValue( animSpeed ) ); return buffer;
+	case PID_FLOW_SPEED: snprintf( buffer, sizeof( buffer ), "%.2fx", FlowSpeedValue( flowSpeed ) ); return buffer;
 	default: return CFFGLPlugin::GetParameterDisplay( index );
 	}
 }

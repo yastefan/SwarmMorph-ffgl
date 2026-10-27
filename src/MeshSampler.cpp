@@ -289,6 +289,27 @@ std::vector< float > EvaluateBinding( const SurfaceBinding& binding, const std::
 	return points;
 }
 
+std::vector< float > EvaluateNormals( const SurfaceBinding& binding, const std::vector< float >& positions )
+{
+	size_t count = binding.indices.size() / 4;
+	std::vector< float > normals( count * 3, 0.0f );
+	for( size_t i = 0; i < count; ++i )
+	{
+		const float* a = &positions[ 3 * binding.indices[ 4 * i ] ];
+		const float* b = &positions[ 3 * binding.indices[ 4 * i + 1 ] ];
+		const float* c = &positions[ 3 * binding.indices[ 4 * i + 2 ] ];
+		float ab[ 3 ] = { b[ 0 ] - a[ 0 ], b[ 1 ] - a[ 1 ], b[ 2 ] - a[ 2 ] };
+		float ac[ 3 ] = { c[ 0 ] - a[ 0 ], c[ 1 ] - a[ 1 ], c[ 2 ] - a[ 2 ] };
+		float n[ 3 ]  = { ab[ 1 ] * ac[ 2 ] - ab[ 2 ] * ac[ 1 ], ab[ 2 ] * ac[ 0 ] - ab[ 0 ] * ac[ 2 ], ab[ 0 ] * ac[ 1 ] - ab[ 1 ] * ac[ 0 ] };
+		float length  = std::sqrt( n[ 0 ] * n[ 0 ] + n[ 1 ] * n[ 1 ] + n[ 2 ] * n[ 2 ] );
+		if( length < 1e-12f )
+			continue;// point cloud or degenerate triangle
+		for( int axis = 0; axis < 3; ++axis )
+			normals[ 3 * i + axis ] = n[ axis ] / length;
+	}
+	return normals;
+}
+
 void Normalization::Apply( std::vector< float >& positions ) const
 {
 	for( size_t i = 0; i + 2 < positions.size(); i += 3 )

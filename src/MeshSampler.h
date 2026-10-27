@@ -52,6 +52,10 @@ SurfaceBinding BindSurface( const Mesh& mesh, size_t count, uint32_t seed );
 // Positions (xyz per particle) of a binding on one set of vertex positions.
 std::vector< float > EvaluateBinding( const SurfaceBinding& binding, const std::vector< float >& positions );
 
+// Unit face normals (xyz per particle) of the bound triangles; zero for
+// particles bound to a single vertex of a point cloud.
+std::vector< float > EvaluateNormals( const SurfaceBinding& binding, const std::vector< float >& positions );
+
 // Translation and scale that centre the given frames on their combined
 // bounding box and fit them inside the unit sphere.
 struct Normalization
