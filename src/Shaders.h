@@ -116,6 +116,32 @@ void main()
 }
 )";
 
+// Animated meshes: evaluates each particle's surface binding (three vertices
+// and weights) against the current frame's vertex positions.
+static const char kSkinFS[] = R"(#version 410 core
+uniform sampler2D uVertices;    // xyz per vertex, uVertexTextureWidth per row
+uniform usampler2D uBindIndices;// xyz = vertex indices
+uniform sampler2D uBindWeights; // xyz = barycentric weights
+uniform int uVertexTextureWidth;
+
+layout( location = 0 ) out vec4 oTarget;
+
+vec3 vertexAt( uint index )
+{
+	int i = int( index );
+	return texelFetch( uVertices, ivec2( i % uVertexTextureWidth, i / uVertexTextureWidth ), 0 ).xyz;
+}
+
+void main()
+{
+	ivec2 texel = ivec2( gl_FragCoord.xy );
+	uvec4 indices = texelFetch( uBindIndices, texel, 0 );
+	vec4 weights = texelFetch( uBindWeights, texel, 0 );
+	vec3 target = vertexAt( indices.x ) * weights.x + vertexAt( indices.y ) * weights.y + vertexAt( indices.z ) * weights.z;
+	oTarget = vec4( target, 1.0 );
+}
+)";
+
 // One point per particle, positioned from the state texture. The particle index
 // comes from a static vertex buffer rather than gl_VertexID: Apple's driver
 // draws attribute-less points about 4x slower.

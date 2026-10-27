@@ -8,6 +8,7 @@ every particle flies to its point on the new surface.
 - OpenGL 4.1 core, so one code base runs on macOS and Windows
 - Meshes are loaded on a background thread, so switching files mid-show doesn't drop frames
 - Polygon meshes are sampled uniformly by surface area; OBJ files without faces are used as point clouds
+- Animated meshes as OBJ sequences (one file per frame, e.g. from Blender); particles ride along with the surface
 
 ## Installing
 
@@ -62,6 +63,33 @@ released. Lower **Attraction** to let the forces win. Particles react with
 individual strength, so wind leaves streaks. Forces act in the mesh's own
 axes, so with **Spin** on, the wind direction turns with the object.
 
+| Group     | Parameter         | What it does |
+|-----------|-------------------|--------------|
+| Animation | Anim Speed        | Playback speed of OBJ sequences, 0–3× (default 1× = 24 fps) |
+|           | Ping Pong         | Play forwards and backwards instead of looping |
+|           | Restart On Switch | Start the sequence from its first frame when it becomes the target |
+|           | OBJ Sequences     | Detect numbered sequences; turn off to load such files as single meshes |
+
+## Animated meshes (OBJ sequences)
+
+Pick any file of a numbered sequence (`walk_0001.obj`, `walk_0002.obj`, ...)
+in a mesh slot and SwarmMorph loads the whole sequence. A sequence needs at
+least three digits before `.obj` and two files with the same prefix in the
+same folder.
+
+Exporting from Blender: **File → Export → Wavefront (.obj)**, enable
+**Animation** and set the frame range. Blender writes one numbered file per
+frame. Playback assumes 24 fps; use **Anim Speed** if your scene runs at a
+different rate. Loops blend the last frame into the first, so export a cycle
+without repeating the first frame at the end.
+
+Each particle is tied to a fixed spot on the first frame's surface and
+follows that spot through the animation. This needs the same vertex count in
+every frame: character, cloth and deformer animations work; simulations that
+rebuild their mesh every frame (fluids, remeshing) don't, and frames with a
+different vertex count are skipped with a warning in Resolume's log. The
+whole animation is normalized as one, so it doesn't jitter in size.
+
 ## Building
 
 Clone with the FFGL SDK submodule:
@@ -111,6 +139,7 @@ renders offscreen on an OpenGL 4.1 core context and writes PNG frames:
 
 ```bash
 python3 tools/make_test_meshes.py
+python3 tools/make_test_sequences.py   # animated test patterns, ~100 MB, not checked in
 cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-debug
 ./build-debug/swarmmorph-harness --plugin build-debug/SwarmMorph.bundle --out renders \
@@ -125,10 +154,13 @@ Resolume. Run `--help` for all options, `--list` for the parameter names, and
 
 ## How it works
 
-- `src/MeshSampler.cpp` parses OBJ files and draws one million random,
-  area-weighted surface points per mesh. Since they are independent samples,
-  any prefix is uniform too, which is how the particle count changes without
-  resampling.
+- `src/MeshSampler.cpp` parses OBJ files and binds one million random,
+  area-weighted surface spots per mesh (a triangle's three vertices plus
+  barycentric weights). Since they are independent samples, any prefix is
+  uniform too, which is how the particle count changes without resampling.
+- Static meshes evaluate the binding once on the CPU. Animated meshes upload
+  only the current frame's vertices (blended between neighbouring frames)
+  and a skin pass evaluates every particle's binding on the GPU.
 - Particle state lives in two RGBA32F textures (position + seed, velocity),
   ping-ponged each frame. The update is a fragment pass: a damped spring
   towards the particle's target point plus a divergence-free swirl field.
