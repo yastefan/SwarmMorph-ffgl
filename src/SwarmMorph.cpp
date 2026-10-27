@@ -63,6 +63,11 @@ enum ParamID
 	PID_GUSTS,
 	PID_VORTEX,
 	PID_RADIAL,
+
+	PID_ANIM_SPEED,
+	PID_PING_PONG,
+	PID_RESTART,
+	PID_SEQUENCES,
 };
 
 const float kPi              = 3.14159265358979f;
@@ -70,7 +75,7 @@ const float kFovY            = 40.0f * kPi / 180.0f;
 const float kScatterImpulse  = 3.0f;
 const int kTextureWidth      = SwarmMorph::kTextureWidth;
 
-GLuint CreateFloatTexture( GLint internalFormat, GLenum format, const float* pixels )
+GLuint CreateTexture( GLint internalFormat, GLenum format, GLenum type, int width, int height, const void* pixels )
 {
 	GLuint texture = 0;
 	glGenTextures( 1, &texture );
@@ -79,8 +84,14 @@ GLuint CreateFloatTexture( GLint internalFormat, GLenum format, const float* pix
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-	glTexImage2D( GL_TEXTURE_2D, 0, internalFormat, kTextureWidth, kTextureWidth, 0, format, GL_FLOAT, pixels );
+	glTexImage2D( GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, pixels );
 	return texture;
+}
+
+// Particle-sized float texture: one texel per particle.
+GLuint CreateFloatTexture( GLint internalFormat, GLenum format, const float* pixels )
+{
+	return CreateTexture( internalFormat, format, GL_FLOAT, kTextureWidth, kTextureWidth, pixels );
 }
 
 // Mappings from the host's normalised 0..1 values to physical quantities.
@@ -109,6 +120,7 @@ float CentredForce( float v, float maxForce )
 float WindValue( float v ) { return CentredForce( v, 10.0f ); }
 float VortexValue( float v ) { return CentredForce( v, 6.0f ); }
 float RadialValue( float v ) { return CentredForce( v, 6.0f ); }
+float AnimSpeedValue( float v ) { return 3.0f * v; }
 
 bool IsMeshParam( unsigned int index )
 {
@@ -171,6 +183,13 @@ SwarmMorph::SwarmMorph()
 	for( unsigned int id = PID_WIND_X; id <= PID_RADIAL; ++id )
 		SetParamGroup( id, "Forces" );
 
+	SetParamInfof( PID_ANIM_SPEED, "Anim Speed", FF_TYPE_STANDARD );
+	SetParamInfo( PID_PING_PONG, "Ping Pong", FF_TYPE_BOOLEAN, pingPong );
+	SetParamInfo( PID_RESTART, "Restart On Switch", FF_TYPE_BOOLEAN, restartOnSwitch );
+	SetParamInfo( PID_SEQUENCES, "OBJ Sequences", FF_TYPE_BOOLEAN, detectSequences );
+	for( unsigned int id = PID_ANIM_SPEED; id <= PID_SEQUENCES; ++id )
+		SetParamGroup( id, "Animation" );
+
 }
 
 SwarmMorph::~SwarmMorph() = default;
@@ -208,6 +227,11 @@ bool SwarmMorph::CreateGLResources()
 	if( !renderShader.Compile( swarm::kRenderVS, swarm::kRenderFS ) )
 	{
 		FFGLLog::LogToHost( "SwarmMorph: render shader failed to compile" );
+		return false;
+	}
+	if( !skinShader.Compile( swarm::kFullscreenVS, swarm::kSkinFS ) )
+	{
+		FFGLLog::LogToHost( "SwarmMorph: skin shader failed to compile" );
 		return false;
 	}
 
@@ -262,8 +286,8 @@ bool SwarmMorph::CreateGLResources()
 		glEnableVertexAttribArray( 0 );
 		glVertexAttribPointer( 0, 1, GL_FLOAT, GL_FALSE, 0, (const void*)0 );
 	}
-	front             = 0;
-	lastTargetTexture = 0;
+	front      = 0;
+	activeSlot = -1;
 
 	// Meshes that were set before the GL context existed (or before a context loss).
 	for( int i = 0; i < kNumSlots; ++i )
@@ -287,6 +311,7 @@ void SwarmMorph::ReleaseGLResources()
 {
 	updateShader.FreeGLResources();
 	renderShader.FreeGLResources();
+	skinShader.FreeGLResources();
 	for( StateBuffer& buffer : state )
 	{
 		glDeleteFramebuffers( 1, &buffer.fbo );
@@ -302,11 +327,20 @@ void SwarmMorph::ReleaseGLResources()
 	fallbackTexture = 0;
 	for( Slot& slot : slots )
 	{
-		glDeleteTextures( 1, &slot.texture );
-		slot.texture = 0;
-		slot.loaded  = false;
+		ReleaseSlotGL( slot );
+		slot.loaded = false;
 	}
-	lastTargetTexture = 0;
+	activeSlot = -1;
+}
+
+void SwarmMorph::ReleaseSlotGL( Slot& slot )
+{
+	glDeleteFramebuffers( 1, &slot.fbo );
+	glDeleteTextures( 1, &slot.texture );
+	glDeleteTextures( 1, &slot.vertexTexture );
+	glDeleteTextures( 1, &slot.bindIndices );
+	glDeleteTextures( 1, &slot.bindWeights );
+	slot.fbo = slot.texture = slot.vertexTexture = slot.bindIndices = slot.bindWeights = 0;
 }
 
 void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
@@ -323,19 +357,41 @@ void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
 	auto job       = std::make_shared< LoadJob >();
 	job->path      = path;
 	slot.pending   = job;
-	bool normalize = normalizeMeshes;
-	uint32_t seed  = 1000u + static_cast< uint32_t >( slotIndex );
-	std::thread( [ job, normalize, seed ]() {
+	bool normalize       = normalizeMeshes;
+	bool detectSequences = this->detectSequences;
+	uint32_t seed        = 1000u + static_cast< uint32_t >( slotIndex );
+	std::thread( [ job, normalize, detectSequences, seed ]() {
 		try
 		{
-			swarm::Mesh mesh;
-			if( swarm::LoadObj( job->path, mesh, job->error ) )
-				job->points = swarm::SampleSurface( mesh, kMaxParticles, seed, normalize );
+			std::vector< std::string > files = detectSequences ? swarm::FindObjSequence( job->path ) : std::vector< std::string >{ job->path };
+			swarm::MeshSequence sequence;
+			if( swarm::LoadObjSequence( files, sequence, job->error, job->warning ) )
+			{
+				std::vector< const std::vector< float >* > allFrames;
+				for( const std::vector< float >& frame : sequence.frames )
+					allFrames.push_back( &frame );
+				swarm::Normalization normalization = swarm::ComputeNormalization( allFrames );
+				if( normalize )
+					for( std::vector< float >& frame : sequence.frames )
+						normalization.Apply( frame );
+
+				swarm::SurfaceBinding binding = swarm::BindSurface( sequence.firstFrame, kMaxParticles, seed );
+				if( sequence.frames.size() > 1 )
+				{
+					job->binding = std::move( binding );
+					job->frames  = std::move( sequence.frames );
+				}
+				else
+				{
+					job->points = swarm::EvaluateBinding( binding, sequence.frames[ 0 ] );
+				}
+			}
 		}
 		catch( const std::exception& e )
 		{
 			job->error = std::string( "Failed to load mesh: " ) + e.what();
 			job->points.clear();
+			job->frames.clear();
 		}
 		job->done = true;
 	} ).detach();
@@ -348,23 +404,116 @@ void SwarmMorph::UploadFinishedLoads()
 		if( !slot.pending || !slot.pending->done )
 			continue;
 		std::shared_ptr< LoadJob > job = std::move( slot.pending );
-		if( job->points.empty() )
+		if( !job->warning.empty() )
+			FFGLLog::LogToHost( ( "SwarmMorph: " + job->path + ": " + job->warning ).c_str() );
+		if( job->points.empty() && job->frames.empty() )
 		{
 			FFGLLog::LogToHost( ( "SwarmMorph: " + job->error ).c_str() );
 			slot.loaded = false;
 			continue;
 		}
-		if( slot.texture == 0 )
+
+		// A slot can switch between static and animated, which use different texture formats.
+		ReleaseSlotGL( slot );
+		slot.frames.clear();
+		slot.blended.clear();
+		if( job->frames.empty() )
 		{
 			slot.texture = CreateFloatTexture( GL_RGB32F, GL_RGB, job->points.data() );
 		}
 		else
 		{
-			Scoped2DTextureBinding binding( slot.texture );
-			glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kTextureWidth, kTextureWidth, GL_RGB, GL_FLOAT, job->points.data() );
+			UploadAnimation( slot, *job );
+			std::string message = "SwarmMorph: loaded " + std::to_string( slot.frames.size() ) + "-frame sequence " + job->path;
+			FFGLLog::LogToHost( message.c_str() );
 		}
 		slot.loaded = true;
 	}
+}
+
+void SwarmMorph::UploadAnimation( Slot& slot, LoadJob& job )
+{
+	slot.frames      = std::move( job.frames );
+	size_t vertices  = slot.frames[ 0 ].size() / 3;
+	slot.vertexRows  = static_cast< int >( ( vertices + kVertexTextureWidth - 1 ) / kVertexTextureWidth );
+	slot.blended.assign( static_cast< size_t >( slot.vertexRows ) * kVertexTextureWidth * 3, 0.0f );
+	slot.vertexTexture = CreateTexture( GL_RGB32F, GL_RGB, GL_FLOAT, kVertexTextureWidth, slot.vertexRows, nullptr );
+	slot.bindIndices   = CreateTexture( GL_RGBA32UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT, kTextureWidth, kTextureWidth, job.binding.indices.data() );
+	slot.bindWeights   = CreateFloatTexture( GL_RGBA32F, GL_RGBA, job.binding.weights.data() );
+	slot.texture       = CreateFloatTexture( GL_RGBA32F, GL_RGBA, nullptr );
+
+	glGenFramebuffers( 1, &slot.fbo );
+	ScopedFBOBinding fboBinding( slot.fbo, ScopedFBOBinding::RB_REVERT );
+	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot.texture, 0 );
+
+	slot.playhead      = 0.0;
+	slot.evaluatedAt   = -1.0;
+	slot.evaluatedRows = 0;
+}
+
+double SwarmMorph::FramePosition( const Slot& slot ) const
+{
+	double frameCount = static_cast< double >( slot.frames.size() );
+	if( pingPong )
+	{
+		double period   = 2.0 * ( frameCount - 1.0 );
+		double position = std::fmod( slot.playhead, period );
+		return position <= frameCount - 1.0 ? position : period - position;
+	}
+	// Looping blends the last frame back into the first, so sequences exported
+	// as a seamless cycle play without a hitch.
+	return std::fmod( slot.playhead, frameCount );
+}
+
+void SwarmMorph::AdvanceAnimation( float deltaTime )
+{
+	if( activeSlot < 0 || !slots[ activeSlot ].IsAnimated() )
+		return;
+	Slot& slot = slots[ activeSlot ];
+	slot.playhead += deltaTime * kSequenceFps * AnimSpeedValue( animSpeed );
+
+	double position = FramePosition( slot );
+	int rows        = ( ParticleCount() + kTextureWidth - 1 ) / kTextureWidth;
+	if( position == slot.evaluatedAt && rows <= slot.evaluatedRows )
+		return;
+
+	// Blend the two neighbouring frames on the CPU; it is only the vertices,
+	// not the particles, so it stays cheap.
+	size_t frameCount       = slot.frames.size();
+	size_t first            = static_cast< size_t >( position ) % frameCount;
+	size_t second           = ( first + 1 ) % frameCount;
+	if( pingPong && second == 0 )
+		second = first;
+	float blend             = static_cast< float >( position - std::floor( position ) );
+	const std::vector< float >& a = slot.frames[ first ];
+	const std::vector< float >& b = slot.frames[ second ];
+	for( size_t i = 0; i < a.size(); ++i )
+		slot.blended[ i ] = a[ i ] + ( b[ i ] - a[ i ] ) * blend;
+	{
+		Scoped2DTextureBinding binding( slot.vertexTexture );
+		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kVertexTextureWidth, slot.vertexRows, GL_RGB, GL_FLOAT, slot.blended.data() );
+	}
+
+	// Skin pass: evaluate every particle's binding against the blended frame.
+	ScopedFBOBinding fboBinding( slot.fbo, ScopedFBOBinding::RB_REVERT );
+	glViewport( 0, 0, kTextureWidth, rows );
+	ScopedShaderBinding shaderBinding( skinShader.GetGLID() );
+	skinShader.Set( "uVertices", 0 );
+	skinShader.Set( "uBindIndices", 1 );
+	skinShader.Set( "uBindWeights", 2 );
+	skinShader.Set( "uVertexTextureWidth", kVertexTextureWidth );
+	ScopedSamplerActivation sampler0( 0 );
+	Scoped2DTextureBinding vertices( slot.vertexTexture );
+	ScopedSamplerActivation sampler1( 1 );
+	Scoped2DTextureBinding indices( slot.bindIndices );
+	ScopedSamplerActivation sampler2( 2 );
+	Scoped2DTextureBinding weights( slot.bindWeights );
+	ScopedVAOBinding vaoBinding( emptyVAO );
+	glDrawArrays( GL_TRIANGLES, 0, 3 );
+	glViewport( currentViewport.x, currentViewport.y, currentViewport.width, currentViewport.height );
+
+	slot.evaluatedAt   = position;
+	slot.evaluatedRows = rows;
 }
 
 void SwarmMorph::SelectNextLoadedSlot()
@@ -382,12 +531,15 @@ void SwarmMorph::SelectNextLoadedSlot()
 
 GLuint SwarmMorph::CurrentTargetTexture()
 {
-	// An empty or still-loading slot keeps the swarm where it is.
+	// An empty or still-loading slot keeps the swarm heading where it was.
+	int previous = activeSlot;
 	if( slots[ targetSlot ].loaded )
-		lastTargetTexture = slots[ targetSlot ].texture;
-	if( lastTargetTexture == 0 )
-		lastTargetTexture = fallbackTexture;
-	return lastTargetTexture;
+		activeSlot = targetSlot;
+	if( activeSlot >= 0 && !slots[ activeSlot ].loaded )
+		activeSlot = -1;
+	if( activeSlot != previous && activeSlot >= 0 && restartOnSwitch )
+		slots[ activeSlot ].playhead = 0.0;
+	return activeSlot >= 0 ? slots[ activeSlot ].texture : fallbackTexture;
 }
 
 int SwarmMorph::ParticleCount() const
@@ -412,7 +564,9 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	spinAngle += SpinValue( spin ) * 2.0f * kPi * deltaTime;
 
 	UploadFinishedLoads();
-	Simulate( deltaTime, CurrentTargetTexture() );
+	GLuint target = CurrentTargetTexture();
+	AdvanceAnimation( deltaTime );
+	Simulate( deltaTime, target );
 	Render();
 	return FF_SUCCESS;
 }
@@ -554,6 +708,18 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_GUSTS: gusts = value; break;
 	case PID_VORTEX: vortex = value; break;
 	case PID_RADIAL: radial = value; break;
+	case PID_ANIM_SPEED: animSpeed = value; break;
+	case PID_PING_PONG: pingPong = value > 0.5f; break;
+	case PID_RESTART: restartOnSwitch = value > 0.5f; break;
+	case PID_SEQUENCES:
+		if( ( value > 0.5f ) != detectSequences )
+		{
+			detectSequences = value > 0.5f;
+			for( int i = 0; i < kNumSlots; ++i )
+				if( !slots[ i ].path.empty() )
+					StartLoad( i, slots[ i ].path );
+		}
+		break;
 	default:
 		return FF_FAIL;
 	}
@@ -591,6 +757,10 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_GUSTS: return gusts;
 	case PID_VORTEX: return vortex;
 	case PID_RADIAL: return radial;
+	case PID_ANIM_SPEED: return animSpeed;
+	case PID_PING_PONG: return pingPong ? 1.0f : 0.0f;
+	case PID_RESTART: return restartOnSwitch ? 1.0f : 0.0f;
+	case PID_SEQUENCES: return detectSequences ? 1.0f : 0.0f;
 	default: return 0.0f;
 	}
 }
@@ -633,6 +803,7 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	case PID_WIND_Z: snprintf( buffer, sizeof( buffer ), "%+.1f", WindValue( windZ ) ); return buffer;
 	case PID_VORTEX: snprintf( buffer, sizeof( buffer ), "%+.1f", VortexValue( vortex ) ); return buffer;
 	case PID_RADIAL: snprintf( buffer, sizeof( buffer ), "%+.1f", RadialValue( radial ) ); return buffer;
+	case PID_ANIM_SPEED: snprintf( buffer, sizeof( buffer ), "%.2fx", AnimSpeedValue( animSpeed ) ); return buffer;
 	default: return CFFGLPlugin::GetParameterDisplay( index );
 	}
 }

@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "MeshSampler.h"
 
 // Resolume source that turns OBJ meshes into a particle swarm. Switching the
 // target mesh makes every particle fly to its point on the new surface.
@@ -15,6 +16,8 @@ public:
 	static constexpr int kTextureWidth   = 1024;
 	static constexpr int kMaxParticles   = kTextureWidth * kTextureWidth;
 	static constexpr int kMinParticles   = 10000;
+	static constexpr int kVertexTextureWidth = 4096;// animated meshes: vertex positions per texture row
+	static constexpr float kSequenceFps      = 24.0f;// Blender's default frame rate
 
 	SwarmMorph();
 	~SwarmMorph() override;
@@ -35,8 +38,11 @@ private:
 	struct LoadJob
 	{
 		std::string path;
-		std::vector< float > points;
+		std::vector< float > points;              // static mesh: target xyz per particle
+		swarm::SurfaceBinding binding;            // animated mesh: where each particle sits
+		std::vector< std::vector< float > > frames;// animated mesh: vertex positions per frame
 		std::string error;
+		std::string warning;
 		std::atomic< bool > done{ false };
 	};
 
@@ -44,8 +50,24 @@ private:
 	{
 		std::string path;
 		std::shared_ptr< LoadJob > pending;
-		GLuint texture = 0;// RGB32F target points, one texel per particle
+		// One texel per particle: RGB32F for a static mesh, RGBA32F rendered
+		// from the current animation frame by the skin pass.
+		GLuint texture = 0;
 		bool loaded    = false;
+
+		// Animation (empty for static meshes).
+		std::vector< std::vector< float > > frames;
+		std::vector< float > blended;// current frame, padded to whole texture rows
+		GLuint vertexTexture = 0;
+		GLuint bindIndices   = 0;
+		GLuint bindWeights   = 0;
+		GLuint fbo           = 0;
+		int vertexRows       = 0;
+		double playhead      = 0.0;// in frames
+		double evaluatedAt   = -1.0;
+		int evaluatedRows    = 0;
+
+		bool IsAnimated() const { return frames.size() > 1; }
 	};
 
 	// Position and velocity textures plus the framebuffer that writes both.
@@ -60,21 +82,26 @@ private:
 	void ReleaseGLResources();
 	void StartLoad( int slot, const std::string& path );
 	void UploadFinishedLoads();
+	void UploadAnimation( Slot& slot, LoadJob& job );
+	void ReleaseSlotGL( Slot& slot );
 	void SelectNextLoadedSlot();
 	GLuint CurrentTargetTexture();
+	void AdvanceAnimation( float deltaTime );
+	double FramePosition( const Slot& slot ) const;
 	int ParticleCount() const;
 	void Simulate( float deltaTime, GLuint targetTexture );
 	void Render();
 
 	Slot slots[ kNumSlots ];
 	GLuint fallbackTexture   = 0;
-	GLuint lastTargetTexture = 0;
+	int activeSlot           = -1;// slot the swarm is heading to; -1 = fallback sphere
 	StateBuffer state[ 2 ];// ping-ponged
 	int front                = 0;// index of the state holding the latest frame
 	GLuint emptyVAO          = 0;// core profile needs a bound VAO even without attributes
 	GLuint indexVBO          = 0;// particle index per vertex, for the render pass
 	GLuint indexVAO          = 0;
 	ffglex::FFGLShader updateShader;
+	ffglex::FFGLShader skinShader;
 	ffglex::FFGLShader renderShader;
 
 	// Parameters, stored as the host's normalised values.
@@ -102,6 +129,10 @@ private:
 	float gusts          = 0.3f;
 	float vortex         = 0.5f;
 	float radial         = 0.5f;
+	float animSpeed      = 1.0f / 3.0f;// 1x
+	bool pingPong        = false;
+	bool restartOnSwitch = true;
+	bool detectSequences = true;
 	bool normalizeMeshes = true;
 	bool nextPressed     = false;
 	bool scatterPressed  = false;

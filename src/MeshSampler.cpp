@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <random>
 
 #if defined( _WIN32 )
@@ -78,38 +80,6 @@ inline bool ResolveIndex( long index, size_t vertexCount, uint32_t& out )
 	return false;
 }
 
-struct Bounds
-{
-	float center[ 3 ];
-	float scale;
-};
-
-Bounds ComputeNormalization( const std::vector< float >& positions )
-{
-	float lo[ 3 ] = { INFINITY, INFINITY, INFINITY };
-	float hi[ 3 ] = { -INFINITY, -INFINITY, -INFINITY };
-	for( size_t i = 0; i + 2 < positions.size(); i += 3 )
-	{
-		for( int axis = 0; axis < 3; ++axis )
-		{
-			lo[ axis ] = std::min( lo[ axis ], positions[ i + axis ] );
-			hi[ axis ] = std::max( hi[ axis ], positions[ i + axis ] );
-		}
-	}
-	Bounds bounds;
-	float radiusSq = 0.0f;
-	for( int axis = 0; axis < 3; ++axis )
-		bounds.center[ axis ] = 0.5f * ( lo[ axis ] + hi[ axis ] );
-	for( size_t i = 0; i + 2 < positions.size(); i += 3 )
-	{
-		float dx = positions[ i ] - bounds.center[ 0 ];
-		float dy = positions[ i + 1 ] - bounds.center[ 1 ];
-		float dz = positions[ i + 2 ] - bounds.center[ 2 ];
-		radiusSq = std::max( radiusSq, dx * dx + dy * dy + dz * dz );
-	}
-	bounds.scale = radiusSq > 0.0f ? 1.0f / std::sqrt( radiusSq ) : 1.0f;
-	return bounds;
-}
 }// namespace
 
 bool LoadObj( const std::string& path, Mesh& mesh, std::string& error )
@@ -177,11 +147,75 @@ bool LoadObj( const std::string& path, Mesh& mesh, std::string& error )
 	return true;
 }
 
-std::vector< float > SampleSurface( const Mesh& mesh, size_t count, uint32_t seed, bool normalize )
+std::vector< std::string > FindObjSequence( const std::string& path )
 {
-	std::vector< float > points( count * 3 );
+	namespace fs = std::filesystem;
+	std::vector< std::string > single{ path };
+	std::error_code ec;
+	fs::path file = fs::u8path( path );
+	std::string stem = file.stem().u8string();
+
+	size_t digits = 0;
+	while( digits < stem.size() && std::isdigit( static_cast< unsigned char >( stem[ stem.size() - 1 - digits ] ) ) )
+		++digits;
+	if( digits < 3 )
+		return single;
+	std::string prefix    = stem.substr( 0, stem.size() - digits );
+	std::string extension = file.extension().u8string();
+
+	std::vector< std::pair< long, std::string > > frames;
+	for( const fs::directory_entry& entry : fs::directory_iterator( file.parent_path(), ec ) )
+	{
+		if( !entry.is_regular_file( ec ) || entry.path().extension().u8string() != extension )
+			continue;
+		std::string candidate = entry.path().stem().u8string();
+		if( candidate.size() <= prefix.size() || candidate.compare( 0, prefix.size(), prefix ) != 0 )
+			continue;
+		std::string number = candidate.substr( prefix.size() );
+		if( !std::all_of( number.begin(), number.end(), []( char c ) { return std::isdigit( static_cast< unsigned char >( c ) ); } ) )
+			continue;
+		frames.emplace_back( std::stol( number ), entry.path().u8string() );
+	}
+	if( ec || frames.size() < 2 )
+		return single;
+
+	std::sort( frames.begin(), frames.end() );
+	std::vector< std::string > files;
+	for( auto& frame : frames )
+		files.push_back( std::move( frame.second ) );
+	return files;
+}
+
+bool LoadObjSequence( const std::vector< std::string >& files, MeshSequence& sequence, std::string& error, std::string& warning )
+{
+	sequence = MeshSequence();
+	if( files.empty() || !LoadObj( files[ 0 ], sequence.firstFrame, error ) )
+		return false;
+	sequence.frames.push_back( sequence.firstFrame.positions );
+
+	size_t skipped = 0;
+	for( size_t i = 1; i < files.size(); ++i )
+	{
+		Mesh frame;
+		std::string frameError;
+		if( LoadObj( files[ i ], frame, frameError ) && frame.positions.size() == sequence.firstFrame.positions.size() )
+			sequence.frames.push_back( std::move( frame.positions ) );
+		else
+			++skipped;
+	}
+	if( skipped > 0 )
+		warning = std::to_string( skipped ) + " of " + std::to_string( files.size() ) +
+				  " frames skipped (unreadable or a different vertex count than the first frame)";
+	return true;
+}
+
+SurfaceBinding BindSurface( const Mesh& mesh, size_t count, uint32_t seed )
+{
+	SurfaceBinding binding;
+	binding.indices.assign( count * 4, 0 );
+	binding.weights.assign( count * 4, 0.0f );
 	if( mesh.positions.empty() || count == 0 )
-		return points;
+		return binding;
 
 	std::mt19937 rng( seed );
 	std::uniform_real_distribution< float > unit( 0.0f, 1.0f );
@@ -210,42 +244,86 @@ std::vector< float > SampleSurface( const Mesh& mesh, size_t count, uint32_t see
 		std::uniform_real_distribution< double > pick( 0.0, total );
 		for( size_t i = 0; i < count; ++i )
 		{
-			size_t t       = std::lower_bound( cumulative.begin(), cumulative.end(), pick( rng ) ) - cumulative.begin();
-			t              = std::min( t, cumulative.size() - 1 );
-			const float* a = v + 3 * mesh.triangles[ 3 * t ];
-			const float* b = v + 3 * mesh.triangles[ 3 * t + 1 ];
-			const float* c = v + 3 * mesh.triangles[ 3 * t + 2 ];
+			size_t t = std::lower_bound( cumulative.begin(), cumulative.end(), pick( rng ) ) - cumulative.begin();
+			t        = std::min( t, cumulative.size() - 1 );
 			// Uniform barycentric coordinates.
 			float r1 = std::sqrt( unit( rng ) );
 			float r2 = unit( rng );
-			float wa = 1.0f - r1;
-			float wb = r1 * ( 1.0f - r2 );
-			float wc = r1 * r2;
-			for( int axis = 0; axis < 3; ++axis )
-				points[ 3 * i + axis ] = wa * a[ axis ] + wb * b[ axis ] + wc * c[ axis ];
+			for( int corner = 0; corner < 3; ++corner )
+				binding.indices[ 4 * i + corner ] = mesh.triangles[ 3 * t + corner ];
+			binding.weights[ 4 * i ]     = 1.0f - r1;
+			binding.weights[ 4 * i + 1 ] = r1 * ( 1.0f - r2 );
+			binding.weights[ 4 * i + 2 ] = r1 * r2;
 		}
 	}
 	else
 	{
-		// Point cloud, or only degenerate faces: draw from the vertices.
+		// Point cloud, or only degenerate faces: bind to the vertices themselves.
 		size_t vertexCount = mesh.positions.size() / 3;
 		std::uniform_int_distribution< size_t > pick( 0, vertexCount - 1 );
 		for( size_t i = 0; i < count; ++i )
 		{
-			size_t index = pick( rng );
-			for( int axis = 0; axis < 3; ++axis )
-				points[ 3 * i + axis ] = v[ 3 * index + axis ];
+			binding.indices[ 4 * i ] = static_cast< uint32_t >( pick( rng ) );
+			binding.weights[ 4 * i ] = 1.0f;
 		}
 	}
+	return binding;
+}
 
-	if( normalize )
+std::vector< float > EvaluateBinding( const SurfaceBinding& binding, const std::vector< float >& positions )
+{
+	size_t count = binding.indices.size() / 4;
+	std::vector< float > points( count * 3, 0.0f );
+	for( size_t i = 0; i < count; ++i )
 	{
-		Bounds bounds = ComputeNormalization( mesh.positions );
-		for( size_t i = 0; i < count; ++i )
+		for( int corner = 0; corner < 3; ++corner )
+		{
+			float weight = binding.weights[ 4 * i + corner ];
+			if( weight == 0.0f )
+				continue;
+			const float* vertex = &positions[ 3 * binding.indices[ 4 * i + corner ] ];
 			for( int axis = 0; axis < 3; ++axis )
-				points[ 3 * i + axis ] = ( points[ 3 * i + axis ] - bounds.center[ axis ] ) * bounds.scale;
+				points[ 3 * i + axis ] += weight * vertex[ axis ];
+		}
 	}
 	return points;
+}
+
+void Normalization::Apply( std::vector< float >& positions ) const
+{
+	for( size_t i = 0; i + 2 < positions.size(); i += 3 )
+		for( int axis = 0; axis < 3; ++axis )
+			positions[ i + axis ] = ( positions[ i + axis ] - center[ axis ] ) * scale;
+}
+
+Normalization ComputeNormalization( const std::vector< const std::vector< float >* >& frames )
+{
+	float lo[ 3 ] = { INFINITY, INFINITY, INFINITY };
+	float hi[ 3 ] = { -INFINITY, -INFINITY, -INFINITY };
+	for( const std::vector< float >* positions : frames )
+		for( size_t i = 0; i + 2 < positions->size(); i += 3 )
+			for( int axis = 0; axis < 3; ++axis )
+			{
+				lo[ axis ] = std::min( lo[ axis ], ( *positions )[ i + axis ] );
+				hi[ axis ] = std::max( hi[ axis ], ( *positions )[ i + axis ] );
+			}
+
+	Normalization normalization;
+	if( !( lo[ 0 ] <= hi[ 0 ] ) )
+		return normalization;
+	for( int axis = 0; axis < 3; ++axis )
+		normalization.center[ axis ] = 0.5f * ( lo[ axis ] + hi[ axis ] );
+	float radiusSq = 0.0f;
+	for( const std::vector< float >* positions : frames )
+		for( size_t i = 0; i + 2 < positions->size(); i += 3 )
+		{
+			float dx = ( *positions )[ i ] - normalization.center[ 0 ];
+			float dy = ( *positions )[ i + 1 ] - normalization.center[ 1 ];
+			float dz = ( *positions )[ i + 2 ] - normalization.center[ 2 ];
+			radiusSq = std::max( radiusSq, dx * dx + dy * dy + dz * dz );
+		}
+	normalization.scale = radiusSq > 0.0f ? 1.0f / std::sqrt( radiusSq ) : 1.0f;
+	return normalization;
 }
 
 std::vector< float > SampleSphere( size_t count, uint32_t seed )
