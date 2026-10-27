@@ -39,6 +39,7 @@ private:
 	{
 		std::string path;
 		std::vector< float > points;              // static mesh: target xyz per particle
+		std::vector< float > normals;             // static mesh: surface normal per particle
 		swarm::SurfaceBinding binding;            // animated mesh: where each particle sits
 		std::vector< std::vector< float > > frames;// animated mesh: vertex positions per frame
 		std::string error;
@@ -53,6 +54,7 @@ private:
 		// One texel per particle: RGB32F for a static mesh, RGBA32F rendered
 		// from the current animation frame by the skin pass.
 		GLuint texture = 0;
+		GLuint normals = 0;// surface normal per particle, same layout as texture
 		bool loaded    = false;
 
 		// Animation (empty for static meshes).
@@ -85,11 +87,11 @@ private:
 	void UploadAnimation( Slot& slot, LoadJob& job );
 	void ReleaseSlotGL( Slot& slot );
 	void SelectNextLoadedSlot();
-	GLuint CurrentTargetTexture();
+	void CurrentTarget( GLuint& targets, GLuint& normals );
 	void AdvanceAnimation( float deltaTime );
 	double FramePosition( const Slot& slot ) const;
 	int ParticleCount() const;
-	void Simulate( float deltaTime, GLuint targetTexture );
+	void Simulate( float deltaTime, GLuint targets, GLuint normals );
 	void Render();
 
 	Slot slots[ kNumSlots ];
@@ -133,6 +135,9 @@ private:
 	bool pingPong        = false;
 	bool restartOnSwitch = true;
 	bool detectSequences = true;
+	float surfaceFlow    = 0.25f;
+	float hover          = 0.15f;
+	float flowSpeed      = 0.25f;
 	bool normalizeMeshes = true;
 	bool nextPressed     = false;
 	bool scatterPressed  = false;
@@ -140,5 +145,6 @@ private:
 
 	double lastTime  = -1.0;
 	float simTime    = 0.0f;
+	float noiseTime  = 0.0f;// advances with Flow Speed
 	float spinAngle  = 0.0f;
 };

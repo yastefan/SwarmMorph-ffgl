@@ -68,6 +68,9 @@ repository has a torus, a knot, a cube and a wave to start with.
   map **Next** to a MIDI pad to step through your loaded models one by one.
 - **Hit the kick:** map **Scatter** to a pad or an audio-reactive trigger for
   a burst that settles back into the shape.
+- **Breathing shapes:** slowly raise **Surface Flow** and **Hover** during a
+  breakdown and the model dissolves into a living, crawling swarm; pull them
+  back down for the drop.
 - **Fader weather:** put **Wind X/Y/Z**, **Vortex** and **Explode** on faders.
   All of them rest at the centre, so the shape stays calm until you move them.
 - **Logos and lettering:** export a logo or 3D text from Blender as `.obj`
@@ -99,8 +102,8 @@ Materials and textures are ignored; only the shape counts.
 |        | Damping          | Low values overshoot and wobble, high values glide in |
 |        | Chaos            | Per-particle variation of the attraction, so the swarm arrives in waves |
 |        | Turbulence       | Swirl while travelling; fades out as particles arrive |
-|        | Shimmer          | Small swirl that stays once the shape has formed |
-|        | Noise Scale      | Size of the swirls |
+|        | Shimmer          | Small 3D swirl that stays once the shape has formed |
+|        | Noise Scale      | Size of the swirls and streams |
 |        | Scatter          | Kick all particles outward |
 | Look   | Point Size       | In pixels at 1080p |
 |        | Color            | Base colour |
@@ -119,8 +122,18 @@ released. Lower **Attraction** to let the forces win. Particles react with
 individual strength, so wind leaves streaks. Forces act in the mesh's own
 axes, so with **Spin** on, the wind direction turns with the object.
 
+All swirling comes from one evolving curl-noise flow field: it never repeats
+and never clumps particles together. **Surface Flow** and **Hover** use the
+surface direction of the model, so they work on meshes with faces; point
+clouds get the plain 3D swirl. On very thin parts (wires, tubes) keep
+**Surface Flow** low or raise **Noise Scale**, otherwise the streams blur the
+detail.
+
 | Group     | Parameter         | What it does |
 |-----------|-------------------|--------------|
+| Swarm     | Surface Flow      | Particles stream along the surface of the shape, like a swarm crawling over it |
+|           | Hover             | Thickness of the loose particle layer floating above and below the surface |
+|           | Flow Speed        | How fast the swirls and streams change (0 freezes the pattern) |
 | Animation | Anim Speed        | Playback speed of OBJ sequences, 0–3× (default 1× = 24 fps) |
 |           | Ping Pong         | Play forwards and backwards instead of looping |
 |           | Restart On Switch | Start the sequence from its first frame when it becomes the target |
@@ -232,7 +245,9 @@ Resolume. Run `--help` for all options, `--list` for the parameter names, and
   and a skin pass evaluates every particle's binding on the GPU.
 - Particle state lives in two RGBA32F textures (position + seed, velocity),
   ping-ponged each frame. The update is a fragment pass: a damped spring
-  towards the particle's target point plus a divergence-free swirl field.
+  towards the particle's target point plus a curl-noise flow field (gradient
+  noise with analytic derivatives), projected onto the surface near the
+  target using the bound triangle's normal.
 - Rendering draws one point per particle, fetching its position from the
   state texture.
 
