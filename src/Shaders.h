@@ -26,6 +26,9 @@ void main()
 // onto the surface so particles stream along the skin of the shape instead of
 // wobbling in and out, plus a soft hover layer above and below it. On top of
 // that shared flow, each particle can buzz around its spot on its own.
+//
+// Blow Away lets particles go: they drop the spring, ride the wind and its
+// turbulence, and with Wrap Edges re-enter on the far side of the picture.
 static const char kUpdateFS[] = R"(#version 410 core
 uniform sampler2D uPositions; // xyz, w = per-particle random seed in [0, 1)
 uniform sampler2D uVelocities;// xyz, w unused
@@ -45,6 +48,12 @@ uniform vec3 uWind;
 uniform float uGusts;
 uniform float uVortex;
 uniform float uRadial;
+uniform float uBlowAway;
+uniform float uWrap;
+uniform mat3 uViewRotation;   // world to camera; the camera looks down -z
+uniform vec3 uViewTranslation;
+uniform vec2 uFrustum;        // half extent of the view per unit of depth
+uniform vec2 uDepthRange;     // near and far depth of the wrap volume
 uniform float uNoiseTime;
 uniform float uSurfaceFlow;
 uniform float uHover;
@@ -166,12 +175,38 @@ void main()
 	vec3 velocity = texelFetch( uVelocities, texel, 0 ).xyz;
 	vec3 target = texelFetch( uTargets, texel, 0 ).xyz;
 
-	vec3 toTarget = target - position;
-	float distance = length( toTarget );
-
 	// Chaos gives each particle its own spring strength, so the swarm arrives in waves.
 	float strength = uAttraction * mix( 1.0, 0.5 + hash( seed * 91.7 ), uChaos );
 	float damping = 2.0 * sqrt( strength ) * uDampingRatio;
+
+	// Blow Away: a particle lets go once the slider passes its ticket; the
+	// short ramp makes the release smooth and the slider reversible.
+	float hold = 1.0;
+	if( uBlowAway > 0.0 )
+	{
+		float edge = uBlowAway * 1.06 - 0.03;
+		hold = smoothstep( edge - 0.03, edge + 0.03, hash( seed * 61.3 ) );
+	}
+
+	// Wind arrives in world space but is set relative to the screen. Gusts are
+	// patches of stronger and weaker air drifting downstream with it.
+	vec3 wind = uWind;
+	if( uGusts > 0.0 && dot( uWind, uWind ) > 0.0 )
+	{
+		float gust = gnoise( position * 0.7 - uWind * ( uTime * 0.12 ) + vec3( 0.0, 0.0, uTime * 0.4 ) );
+		wind *= max( 1.0 + uGusts * gust * 2.0, 0.0 );
+	}
+	// Held particles lean with the wind: their spot moves downstream by the
+	// offset the force would settle into against the spring. Moving the spot
+	// rather than pushing the particle keeps them counted as arrived, so the
+	// in-flight turbulence stays out of it and the shape stays readable. A
+	// small spread per particle stretches it a little along the wind.
+	// The shared attraction, not this particle's own, so Chaos doesn't tear it.
+	float lean = 0.4 * ( 0.9 + 0.2 * hash( seed * 23.1 ) );
+	target += wind * ( lean / uAttraction );
+
+	vec3 toTarget = target - position;
+	float distance = length( toTarget );
 
 	// All swirl terms are offsets from the target that the spring settles into,
 	// so they shape the swarm without ever overpowering the spring.
@@ -194,25 +229,24 @@ void main()
 		swirl += ( wander - normal * depth * 0.65 ) * uBuzz * nearSurface;
 	}
 
-	vec3 acceleration = strength * ( toTarget + swirl );
+	vec3 acceleration = strength * ( toTarget + swirl ) * hold;
 
-	// External forces. Against the spring they settle into an offset of
-	// force / strength, so they smear and stretch the shape instead of blowing
-	// it away. Each particle reacts differently, which turns wind into streaks.
+	// Vortex and Explode push; against the spring they bend and inflate the
+	// shape, each particle a little differently.
 	float response = 0.5 + hash( seed * 23.1 );
-	float windSpeed = length( uWind );
-	vec3 externalForce = uWind;
-	if( windSpeed > 0.0 )
-	{
-		// Gusts travel through the shape along the wind direction.
-		float wave = 0.5 + 0.5 * sin( dot( position, uWind / windSpeed ) * 2.0 - uTime * 3.0 + seed * 2.0 );
-		externalForce *= mix( 1.0, 2.0 * wave, uGusts );
-	}
-	externalForce += uVortex * vec3( -position.z, 0.0, position.x );
+	vec3 externalForce = uVortex * vec3( -position.z, 0.0, position.x );
 	float radius = length( position );
 	if( radius > 1e-4 )
 		externalForce += uRadial * position / radius;
 	acceleration += externalForce * response;
+
+	// Released particles: drag pulls them to the speed of the air, which is
+	// the wind plus the curl flow, livelier the stronger the wind blows.
+	if( hold < 1.0 )
+	{
+		vec3 air = wind * response + field * ( 0.9 + 0.6 * length( wind ) );
+		acceleration += ( air - velocity ) * ( 1.5 * response * ( 1.0 - hold ) );
+	}
 
 	if( uScatter > 0.0 )
 	{
@@ -221,8 +255,29 @@ void main()
 	}
 
 	velocity += acceleration * uDeltaTime;
-	velocity *= exp( -damping * uDeltaTime );
+	velocity *= exp( -damping * hold * uDeltaTime );
 	position += velocity * uDeltaTime;
+
+	// Wrap Edges: a released particle that leaves the picture comes back in on
+	// the opposite side, at the same depth (or at the same spot on screen when
+	// it leaves through the front or back of the volume).
+	if( uWrap > 0.5 && hold < 0.5 )
+	{
+		vec3 view = uViewRotation * position + uViewTranslation;
+		float depth = -view.z;
+		float span = uDepthRange.y - uDepthRange.x;
+		float wrappedDepth = depth < uDepthRange.x ? depth + span : ( depth > uDepthRange.y ? depth - span : depth );
+		vec2 xy = view.xy * ( wrappedDepth / max( depth, 1e-3 ) );
+		// A small margin so points have fully left the picture before they jump.
+		vec2 halfExtent = uFrustum * wrappedDepth * 1.08;
+		bool outside = any( greaterThan( abs( xy ), halfExtent ) );
+		if( outside || wrappedDepth != depth )
+		{
+			if( outside )
+				xy = mod( xy + halfExtent, 2.0 * halfExtent ) - halfExtent;
+			position = transpose( uViewRotation ) * ( vec3( xy, -wrappedDepth ) - uViewTranslation );
+		}
+	}
 
 	oPosition = vec4( position, seed );
 	oVelocity = vec4( velocity, 0.0 );

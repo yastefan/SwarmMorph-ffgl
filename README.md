@@ -15,6 +15,7 @@ HD and beyond.
 - 10,000 to 1,048,576 particles
 - Animated meshes from Blender, Cinema 4D, Houdini or Maya as Alembic (`.abc`) or OBJ sequences
 - Wind, gusts, vortex and explode forces that bend the shape and let it spring back
+- Blow particles off the shape and across the screen, wrapping around the edges
 - Swirl, shimmer, scatter, speed glow and a free-spinning camera
 - Meshes load in the background, so loading a new file mid-show doesn't drop frames
 
@@ -61,6 +62,11 @@ decade has. Macs with Intel or Apple Silicon are both supported.
 
 No models at hand? The [`examples/meshes`](examples/meshes) folder of this
 repository has a torus, a knot, a cube and a wave to start with.
+For animation, [`tools/blender/make_creature_animations.py`](tools/blender/make_creature_animations.py)
+builds ten seamlessly looping Alembic creatures in Blender: a pulsing
+jellyfish, manta ray, koi, sea serpent, butterfly, blooming lotus, sea
+anemone, kelp forest, DNA helix and octopus (see *Testing without Resolume*
+for the command).
 
 ## Ideas for live shows
 
@@ -76,6 +82,10 @@ repository has a torus, a knot, a cube and a wave to start with.
   back down for the drop.
 - **Fader weather:** put **Wind X/Y/Z**, **Vortex** and **Explode** on faders.
   All of them rest at the centre, so the shape stays calm until you move them.
+- **Blown away:** set some **Wind X**, then raise **Blow Away**. Particles
+  peel off the model and drift across the screen; with **Wrap Edges** on they
+  come back in on the other side, so at 100 % the model turns into an endless
+  stream. Pull the fader down and they fly home and rebuild the shape.
 - **Logos and lettering:** export a logo or 3D text from Blender as `.obj`
   and let the swarm assemble it.
 - **Layer it:** SwarmMorph's background is transparent and the particles are
@@ -95,36 +105,46 @@ Materials and textures are ignored; only the shape counts.
 
 ## Parameters
 
-| Group  | Parameter        | What it does |
-|--------|------------------|--------------|
-| Meshes | Mesh 1–8         | `.obj` or `.abc` file per slot |
-|        | Normalize        | Centre each mesh and scale it to the unit sphere |
-|        | Target           | Slot the swarm flies to (1–8). Empty or failed slots are ignored. |
-|        | Next             | Jump to the next loaded slot (map it to a MIDI pad or the BPM) |
-| Motion | Particles        | Particle count, 10k – 1M |
-|        | Attraction       | Spring strength: how fast particles reach the new shape |
-|        | Damping          | Low values overshoot and wobble, high values glide in |
-|        | Chaos            | Per-particle variation of the attraction, so the swarm arrives in waves |
-|        | Turbulence       | Swirl while travelling; fades out as particles arrive |
-|        | Shimmer          | Small 3D swirl that stays once the shape has formed |
-|        | Noise Scale      | Size of the swirls and streams |
-|        | Scatter          | Kick all particles outward |
-| Look   | Point Size       | In pixels at 1080p |
-|        | Color            | Base colour |
-|        | Speed Glow       | Fast particles glow towards white |
-|        | Brightness       | Additive intensity |
-| Camera | Spin             | Continuous rotation, centre = still |
-|        | Rotate X/Y, Zoom | Camera orientation and distance |
-| Forces | Wind X/Y/Z       | Constant force along each axis, centre = none. Wind Y below centre acts as gravity. |
-|        | Gusts            | Waves of stronger and weaker wind travelling through the shape |
-|        | Vortex           | Twist around the vertical axis, either direction |
-|        | Explode          | Push outward from the centre; below centre pulls inward |
+The parameters appear in Resolume in this order:
 
-Forces work against the attraction: the shape settles into a stretched,
-displaced or twisted version of itself and springs back when the force is
-released. Lower **Attraction** to let the forces win. Particles react with
-individual strength, so wind leaves streaks. Forces act in the mesh's own
-axes, so with **Spin** on, the wind direction turns with the object.
+| Group     | Parameter         | What it does |
+|-----------|-------------------|--------------|
+| Meshes    | Mesh 1–8          | `.obj` or `.abc` file per slot |
+|           | Normalize         | Centre each mesh and scale it to the unit sphere |
+|           | OBJ Sequences     | Detect numbered sequences; turn off to load such files as single meshes |
+|           | Target            | Slot the swarm flies to (1–8). Empty or failed slots are ignored. |
+|           | Next              | Jump to the next loaded slot (map it to a MIDI pad or the BPM) |
+| Morph     | Attraction        | Spring strength: how fast particles reach the new shape, and how firmly they hold it |
+|           | Damping           | Low values overshoot and wobble, high values glide in |
+|           | Chaos             | Per-particle variation of the attraction, so the swarm arrives in waves |
+|           | Turbulence        | Swirl while travelling; fades out as particles arrive |
+|           | Scatter           | Kick all particles outward |
+| Swarm     | Surface Flow      | Particles stream along the surface of the shape, like a swarm crawling over it |
+|           | Hover             | Thickness of the loose particle layer floating above and below the surface |
+|           | Shimmer           | Small 3D swirl that stays once the shape has formed |
+|           | Flow Scale        | Size of the swirls and streams (also of Turbulence) |
+|           | Flow Speed        | How fast the swirls and streams change (0 freezes the pattern) |
+|           | Buzz              | Every particle wanders around its own spot on the surface, independently of its neighbours |
+|           | Buzz Speed        | From slow drifting to nervous flickering |
+| Forces    | Wind X/Y/Z        | Wind across the screen (X = right, Y = up, Z = towards you), centre = none. Wind Y below centre acts as gravity. |
+|           | Gusts             | Patches of stronger and weaker wind drifting through the shape |
+|           | Blow Away         | Share of particles that let go of the shape and ride the wind |
+|           | Wrap Edges        | Blown-away particles that leave the picture come back on the other side |
+|           | Vortex            | Twist around the vertical axis, either direction |
+|           | Explode           | Push outward from the centre; below centre pulls inward |
+| Animation | Anim Speed        | Playback speed of animations, 0–3× (1× = the file's own frame rate; 24 fps for OBJ sequences) |
+|           | Ping Pong         | Play forwards and backwards instead of looping |
+|           | Restart On Switch | Start the sequence from its first frame when it becomes the target |
+| Look      | Particles         | Particle count, 10k – 1M |
+|           | Point Size        | In pixels at 1080p |
+|           | Color             | Base colour |
+|           | Speed Glow        | Fast particles glow towards white |
+|           | Brightness        | Additive intensity |
+| Camera    | Spin              | Continuous rotation, centre = still |
+|           | Rotate X/Y, Zoom  | Camera orientation and distance |
+
+**Morph** shapes the flight from one model to the next; **Swarm** is how the
+particles move once they have arrived.
 
 **Surface Flow**, **Hover**, **Turbulence** and **Shimmer** all come from one
 evolving curl-noise flow field: it never repeats and never clumps particles
@@ -134,20 +154,16 @@ swarm of fireflies, while the shape stays crisp. Mix both for streams full of
 individual movement. **Surface Flow** and **Hover** use the
 surface direction of the model, so they work on meshes with faces; point
 clouds get the plain 3D swirl. On very thin parts (wires, tubes) keep
-**Surface Flow** low or raise **Noise Scale**, otherwise the streams blur the
+**Surface Flow** low or raise **Flow Scale**, otherwise the streams blur the
 detail.
 
-| Group     | Parameter         | What it does |
-|-----------|-------------------|--------------|
-| Swarm     | Surface Flow      | Particles stream along the surface of the shape, like a swarm crawling over it |
-|           | Hover             | Thickness of the loose particle layer floating above and below the surface |
-|           | Flow Speed        | How fast the swirls and streams change (0 freezes the pattern) |
-|           | Buzz              | Every particle wanders around its own spot on the surface, independently of its neighbours |
-|           | Buzz Speed        | From slow drifting to nervous flickering |
-| Animation | Anim Speed        | Playback speed of animations, 0–3× (1× = the file's own frame rate; 24 fps for OBJ sequences) |
-|           | Ping Pong         | Play forwards and backwards instead of looping |
-|           | Restart On Switch | Start the sequence from its first frame when it becomes the target |
-|           | OBJ Sequences     | Detect numbered sequences; turn off to load such files as single meshes |
+Wind leans the shape downstream and **Gusts** make it flutter, while the
+model stays recognisable; higher **Attraction** holds it more firmly. Wind
+always blows relative to the screen, even while the camera spins. To really
+blow particles away, raise **Blow Away**: they leave the shape one by one, get
+carried by the wind and the flow field, and return when you lower it again.
+**Vortex** and **Explode** push in the model's own space and twist or inflate
+it until you release them.
 
 ## Animated meshes
 
@@ -259,6 +275,7 @@ renders offscreen on an OpenGL 4.1 core context and writes PNG frames:
 python3 tools/make_test_meshes.py
 python3 tools/make_test_sequences.py   # animated test patterns, ~100 MB, not checked in
 blender --background --factory-startup --python tools/blender/make_alembic_tests.py  # Alembic test files
+blender --background --factory-startup --python tools/blender/make_creature_animations.py  # looping Alembic creatures
 cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-debug
 ./build-debug/swarmmorph-harness --plugin build-debug/SwarmMorph.bundle --out renders \
@@ -286,6 +303,9 @@ Resolume. Run `--help` for all options, `--list` for the parameter names, and
   noise with analytic derivatives), projected onto the surface near the
   target using the bound triangle's normal. Buzz gives every particle its own
   lane through the noise, keyed by its random seed instead of its position.
+  Wind moves the spring's rest point rather than pushing the particle, so the
+  in-flight turbulence doesn't kick in. Blown-away particles swap the spring
+  for drag towards the air speed and wrap around the camera's view volume.
 - Rendering draws one point per particle, fetching its position from the
   state texture.
 
