@@ -24,7 +24,8 @@ void main()
 // by a damped spring. A curl-noise flow field bends its path: strong and fully
 // 3D while the particle travels; once it has arrived, the field is projected
 // onto the surface so particles stream along the skin of the shape instead of
-// wobbling in and out, plus a soft hover layer above and below it.
+// wobbling in and out, plus a soft hover layer above and below it. On top of
+// that shared flow, each particle can buzz around its spot on its own.
 static const char kUpdateFS[] = R"(#version 410 core
 uniform sampler2D uPositions; // xyz, w = per-particle random seed in [0, 1)
 uniform sampler2D uVelocities;// xyz, w unused
@@ -47,6 +48,8 @@ uniform float uRadial;
 uniform float uNoiseTime;
 uniform float uSurfaceFlow;
 uniform float uHover;
+uniform float uBuzz;
+uniform float uBuzzTime;
 
 layout( location = 0 ) out vec4 oPosition;
 layout( location = 1 ) out vec4 oVelocity;
@@ -113,6 +116,35 @@ vec4 noised( vec3 x )
 	return vec4( value, gradient );
 }
 
+// Gradient noise value only, for when the derivative isn't needed.
+float gnoise( vec3 x )
+{
+	vec3 i = floor( x );
+	vec3 f = fract( x );
+	vec3 u = f * f * f * ( f * ( f * 6.0 - 15.0 ) + 10.0 );
+	float va = dot( gradientAt( i + vec3( 0.0, 0.0, 0.0 ) ), f - vec3( 0.0, 0.0, 0.0 ) );
+	float vb = dot( gradientAt( i + vec3( 1.0, 0.0, 0.0 ) ), f - vec3( 1.0, 0.0, 0.0 ) );
+	float vc = dot( gradientAt( i + vec3( 0.0, 1.0, 0.0 ) ), f - vec3( 0.0, 1.0, 0.0 ) );
+	float vd = dot( gradientAt( i + vec3( 1.0, 1.0, 0.0 ) ), f - vec3( 1.0, 1.0, 0.0 ) );
+	float ve = dot( gradientAt( i + vec3( 0.0, 0.0, 1.0 ) ), f - vec3( 0.0, 0.0, 1.0 ) );
+	float vf = dot( gradientAt( i + vec3( 1.0, 0.0, 1.0 ) ), f - vec3( 1.0, 0.0, 1.0 ) );
+	float vg = dot( gradientAt( i + vec3( 0.0, 1.0, 1.0 ) ), f - vec3( 0.0, 1.0, 1.0 ) );
+	float vh = dot( gradientAt( i + vec3( 1.0, 1.0, 1.0 ) ), f - vec3( 1.0, 1.0, 1.0 ) );
+	return mix( mix( mix( va, vb, u.x ), mix( vc, vd, u.x ), u.y ), mix( mix( ve, vf, u.x ), mix( vg, vh, u.x ), u.y ), u.z );
+}
+
+// Each particle's own wandering offset, roughly in [-1, 1]: it walks its own
+// lane far away from everyone else's in the noise field, at its own pace, so
+// neighbours move independently instead of together.
+vec3 buzz( float seed, float t )
+{
+	vec3 lane = vec3( hash( seed * 13.1 ), hash( seed * 57.3 ), hash( seed * 91.9 ) ) * 512.0;
+	float pace = t * ( 0.6 + 0.8 * hash( seed * 3.7 ) );
+	return vec3( gnoise( lane + vec3( pace, 0.0, 0.0 ) ),
+				 gnoise( lane + vec3( 17.0, pace, 0.0 ) ),
+				 gnoise( lane + vec3( 0.0, 41.0, pace ) ) ) * 2.0;
+}
+
 // Curl of three noise potentials that drift in different directions, so the
 // flow keeps changing shape instead of repeating. Being a curl, it has zero
 // divergence: particles stream past each other instead of clumping.
@@ -154,6 +186,13 @@ void main()
 	vec3 alongSurface = field - normal * dot( field, normal );
 	float layer = potential * 2.0 + hash( seed * 7.7 ) - 0.5;
 	swirl += ( alongSurface * uSurfaceFlow + normal * layer * uHover ) * nearSurface;
+	// Individual buzz: mostly along the surface, a little in and out of it.
+	if( uBuzz > 0.0 )
+	{
+		vec3 wander = buzz( seed, uBuzzTime );
+		float depth = dot( wander, normal );
+		swirl += ( wander - normal * depth * 0.65 ) * uBuzz * nearSurface;
+	}
 
 	vec3 acceleration = strength * ( toTarget + swirl );
 

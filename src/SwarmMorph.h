@@ -139,6 +139,8 @@ private:
 	float surfaceFlow    = 0.25f;
 	float hover          = 0.15f;
 	float flowSpeed      = 0.25f;
+	float buzzAmount     = 0.3f;
+	float buzzSpeed      = 0.3f;
 	bool normalizeMeshes = true;
 	bool nextPressed     = false;
 	bool scatterPressed  = false;
@@ -147,5 +149,6 @@ private:
 	double lastTime  = -1.0;
 	float simTime    = 0.0f;
 	float noiseTime  = 0.0f;// advances with Flow Speed
+	float buzzTime   = 0.0f;// advances with Buzz Speed
 	float spinAngle  = 0.0f;
 };

@@ -68,6 +68,9 @@ repository has a torus, a knot, a cube and a wave to start with.
   map **Next** to a MIDI pad to step through your loaded models one by one.
 - **Hit the kick:** map **Scatter** to a pad or an audio-reactive trigger for
   a burst that settles back into the shape.
+- **Fireflies:** turn **Surface Flow** down, **Buzz** up and lower
+  **Particles** with a bigger **Point Size**: every particle visibly buzzes
+  around the model on its own.
 - **Breathing shapes:** slowly raise **Surface Flow** and **Hover** during a
   breakdown and the model dissolves into a living, crawling swarm; pull them
   back down for the drop.
@@ -123,8 +126,12 @@ released. Lower **Attraction** to let the forces win. Particles react with
 individual strength, so wind leaves streaks. Forces act in the mesh's own
 axes, so with **Spin** on, the wind direction turns with the object.
 
-All swirling comes from one evolving curl-noise flow field: it never repeats
-and never clumps particles together. **Surface Flow** and **Hover** use the
+**Surface Flow**, **Hover**, **Turbulence** and **Shimmer** all come from one
+evolving curl-noise flow field: it never repeats and never clumps particles
+together, but neighbouring particles move together, so the shape itself seems
+to flow. **Buzz** is the opposite: each particle follows its own path, like a
+swarm of fireflies, while the shape stays crisp. Mix both for streams full of
+individual movement. **Surface Flow** and **Hover** use the
 surface direction of the model, so they work on meshes with faces; point
 clouds get the plain 3D swirl. On very thin parts (wires, tubes) keep
 **Surface Flow** low or raise **Noise Scale**, otherwise the streams blur the
@@ -135,6 +142,8 @@ detail.
 | Swarm     | Surface Flow      | Particles stream along the surface of the shape, like a swarm crawling over it |
 |           | Hover             | Thickness of the loose particle layer floating above and below the surface |
 |           | Flow Speed        | How fast the swirls and streams change (0 freezes the pattern) |
+|           | Buzz              | Every particle wanders around its own spot on the surface, independently of its neighbours |
+|           | Buzz Speed        | From slow drifting to nervous flickering |
 | Animation | Anim Speed        | Playback speed of animations, 0–3× (1× = the file's own frame rate; 24 fps for OBJ sequences) |
 |           | Ping Pong         | Play forwards and backwards instead of looping |
 |           | Restart On Switch | Start the sequence from its first frame when it becomes the target |
@@ -275,7 +284,8 @@ Resolume. Run `--help` for all options, `--list` for the parameter names, and
   ping-ponged each frame. The update is a fragment pass: a damped spring
   towards the particle's target point plus a curl-noise flow field (gradient
   noise with analytic derivatives), projected onto the surface near the
-  target using the bound triangle's normal.
+  target using the bound triangle's normal. Buzz gives every particle its own
+  lane through the noise, keyed by its random seed instead of its position.
 - Rendering draws one point per particle, fetching its position from the
   state texture.
 
