@@ -16,7 +16,8 @@ HD and beyond.
 - Animated meshes from Blender, Cinema 4D, Houdini or Maya as Alembic (`.abc`) or OBJ sequences
 - Wind, gusts, vortex and explode forces that bend the shape and let it spring back
 - Blow particles off the shape and across the screen, wrapping around the edges
-- Swirl, shimmer, scatter, speed glow and a free-spinning camera
+- Swirl, shimmer, scatter and a free-spinning camera
+- Two-colour gradients by speed, height or depth, random sparks, twinkle and depth fog
 - Meshes load in the background, so loading a new file mid-show doesn't drop frames
 
 ## Download and install
@@ -74,12 +75,17 @@ for the command).
   map **Next** to a MIDI pad to step through your loaded models one by one.
 - **Hit the kick:** map **Scatter** to a pad or an audio-reactive trigger for
   a burst that settles back into the shape.
-- **Fireflies:** turn **Surface Flow** down, **Buzz** up and lower
-  **Particles** with a bigger **Point Size**: every particle visibly buzzes
-  around the model on its own.
+- **Fireflies:** turn **Surface Flow** down, **Buzz** and **Twinkle** up and
+  lower **Particles** with a bigger **Point Size**: every particle visibly
+  buzzes and blinks around the model on its own.
 - **Breathing shapes:** slowly raise **Surface Flow** and **Hover** during a
   breakdown and the model dissolves into a living, crawling swarm; pull them
   back down for the drop.
+- **Hot flight:** set **Color Mode** to Speed, **Color 2** to orange and
+  **Color Mix** to about 0.6: the swarm burns while it morphs and cools back
+  to Color 1 as it settles.
+- **Sparks:** Color Mode Random, **Color Mix** around 0.1 and some
+  **Twinkle** sprinkle a few golden sparks into a blue swarm.
 - **Fader weather:** put **Wind X/Y/Z**, **Vortex** and **Explode** on faders.
   All of them rest at the centre, so the shape stays calm until you move them.
 - **Blown away:** set some **Wind X**, then raise **Blow Away**. Particles
@@ -140,6 +146,11 @@ The parameters appear in Resolume in this order:
 |           | Color             | Base colour |
 |           | Speed Glow        | Fast particles glow towards white |
 |           | Brightness        | Additive intensity |
+|           | Color 2           | Second colour, used by Color Mode |
+|           | Color Mode        | How the two colours are spread: **Speed** (fast particles turn Color 2), **Height** (top to bottom), **Depth** (front to back) or **Random** (each particle one or the other) |
+|           | Color Mix         | How much Color 2: 0 = none, 0.5 = the full gradient, 1 = all. For Speed it is the sensitivity, for Random the share of particles. |
+|           | Twinkle           | Each particle flares up now and then at its own rhythm |
+|           | Depth Fade        | The back of the shape fades into darkness, like fog |
 | Camera    | Spin              | Continuous rotation, centre = still |
 |           | Rotate X/Y, Zoom  | Camera orientation and distance |
 

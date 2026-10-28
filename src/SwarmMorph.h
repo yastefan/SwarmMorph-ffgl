@@ -125,6 +125,13 @@ private:
 	float colorB         = 1.0f;
 	float heat           = 0.5f;
 	float brightness     = 0.2f;
+	float color2R        = 1.0f;
+	float color2G        = 0.45f;
+	float color2B        = 0.15f;
+	int colorMode        = 0;// 0 speed, 1 height, 2 depth, 3 random
+	float colorMix       = 0.0f;
+	float twinkle        = 0.0f;
+	float depthFade      = 0.0f;
 	float spin           = 0.55f;
 	float rotateX        = 0.5f;
 	float rotateY        = 0.5f;
