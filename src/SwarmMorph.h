@@ -17,7 +17,6 @@ public:
 	static constexpr int kMaxParticles   = kTextureWidth * kTextureWidth;
 	static constexpr int kMinParticles   = 10000;
 	static constexpr int kVertexTextureWidth = 4096;// animated meshes: vertex positions per texture row
-	static constexpr float kSequenceFps      = 24.0f;// Blender's default frame rate
 
 	SwarmMorph();
 	~SwarmMorph() override;
@@ -42,6 +41,7 @@ private:
 		std::vector< float > normals;             // static mesh: surface normal per particle
 		swarm::SurfaceBinding binding;            // animated mesh: where each particle sits
 		std::vector< std::vector< float > > frames;// animated mesh: vertex positions per frame
+		float fps = 24.0f;                         // animated mesh: playback rate at 1x
 		std::string error;
 		std::string warning;
 		std::atomic< bool > done{ false };
@@ -66,6 +66,7 @@ private:
 		GLuint fbo           = 0;
 		int vertexRows       = 0;
 		double playhead      = 0.0;// in frames
+		float fps            = 24.0f;
 		double evaluatedAt   = -1.0;
 		int evaluatedRows    = 0;
 

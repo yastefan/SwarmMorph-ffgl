@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.29)  # Alembic needs 3.29
 project(SwarmMorph VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -20,13 +20,51 @@ if(NOT EXISTS ${FFGL_DIR}/source/lib/FFGLSDK.cpp)
 endif()
 
 # ---------------------------------------------------------------------------
+# Alembic (.abc) support: Alembic and Imath are fetched and linked statically,
+# Ogawa back end only (no HDF5).
+# ---------------------------------------------------------------------------
+option(SWARMMORPH_WITH_ALEMBIC "Support Alembic (.abc) files" ON)
+if(SWARMMORPH_WITH_ALEMBIC)
+    include(FetchContent)
+    # Imath declares an older CMake minimum; without this it would ignore
+    # CMAKE_MSVC_RUNTIME_LIBRARY and link the dynamic CRT on Windows.
+    set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(IMATH_INSTALL_PKG_CONFIG OFF CACHE BOOL "" FORCE)
+    set(ALEMBIC_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(ALEMBIC_DEBUG_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+    set(USE_BINARIES OFF CACHE BOOL "" FORCE)
+    set(USE_TESTS OFF CACHE BOOL "" FORCE)
+    set(USE_HDF5 OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(Imath
+        URL https://github.com/AcademySoftwareFoundation/Imath/archive/refs/tags/v3.2.3.tar.gz
+        URL_HASH SHA256=e10c12b3f21f45bf08e09d4215d9c7691368d747beebd840de0b6fefed2df9f8)
+    FetchContent_Declare(Alembic
+        URL https://github.com/alembic/alembic/archive/refs/tags/1.8.12.tar.gz
+        URL_HASH SHA256=b6d916c40446e8c502c84273092ab3d98f3f7f6094f8a2b8203d23e2f1d2a4a0)
+    FetchContent_MakeAvailable(Imath)
+    # Alembic includes <Imath/half.h> as in an installed tree; Imath's build
+    # tree only exposes src/Imath, so add its parent.
+    target_include_directories(Imath INTERFACE $<BUILD_INTERFACE:${imath_SOURCE_DIR}/src>)
+    FetchContent_MakeAvailable(Alembic)
+endif()
+
+# ---------------------------------------------------------------------------
 # Mesh loading and sampling, free of OpenGL so the test harness can use it too.
 # ---------------------------------------------------------------------------
 add_library(swarmmorph-mesh STATIC
     src/MeshSampler.h
     src/MeshSampler.cpp
+    src/AlembicLoader.h
+    src/AlembicLoader.cpp
 )
 target_include_directories(swarmmorph-mesh PUBLIC src)
+if(SWARMMORPH_WITH_ALEMBIC)
+    target_link_libraries(swarmmorph-mesh PRIVATE Alembic::Alembic)
+    target_compile_definitions(swarmmorph-mesh PUBLIC SWARMMORPH_WITH_ALEMBIC=1)
+endif()
 if(MSVC)
     target_compile_definitions(swarmmorph-mesh PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
@@ -42,6 +80,8 @@ add_library(SwarmMorph MODULE
     ${FFGL_DIR}/source/lib/FFGLSDK.cpp
 )
 target_include_directories(SwarmMorph PRIVATE src ${FFGL_DIR}/source/lib)
+# Imath sets a global "_d" debug postfix; the host and harness expect the plain name.
+set_target_properties(SwarmMorph PROPERTIES DEBUG_POSTFIX "")
 target_link_libraries(SwarmMorph PRIVATE swarmmorph-mesh)
 # The plugin reports the project version to the host.
 target_compile_definitions(SwarmMorph PRIVATE
