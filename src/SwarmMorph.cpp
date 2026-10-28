@@ -75,6 +75,8 @@ enum ParamID
 	PID_SURFACE_FLOW,
 	PID_HOVER,
 	PID_FLOW_SPEED,
+	PID_BUZZ,
+	PID_BUZZ_SPEED,
 };
 
 const float kPi              = 3.14159265358979f;
@@ -164,6 +166,8 @@ float AnimSpeedValue( float v ) { return 3.0f * v; }
 float SurfaceFlowValue( float v ) { return 0.4f * v; }
 float HoverValue( float v ) { return 0.25f * v; }
 float FlowSpeedValue( float v ) { return 2.0f * v; }
+float BuzzValue( float v ) { return 0.15f * v; }
+float BuzzSpeedValue( float v ) { return 4.0f * v; }
 
 bool IsAlembicPath( const std::string& path )
 {
@@ -248,7 +252,9 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_SURFACE_FLOW, "Surface Flow", FF_TYPE_STANDARD );
 	SetParamInfof( PID_HOVER, "Hover", FF_TYPE_STANDARD );
 	SetParamInfof( PID_FLOW_SPEED, "Flow Speed", FF_TYPE_STANDARD );
-	for( unsigned int id = PID_SURFACE_FLOW; id <= PID_FLOW_SPEED; ++id )
+	SetParamInfof( PID_BUZZ, "Buzz", FF_TYPE_STANDARD );
+	SetParamInfof( PID_BUZZ_SPEED, "Buzz Speed", FF_TYPE_STANDARD );
+	for( unsigned int id = PID_SURFACE_FLOW; id <= PID_BUZZ_SPEED; ++id )
 		SetParamGroup( id, "Swarm" );
 
 }
@@ -651,6 +657,7 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 
 	UploadFinishedLoads();
 	noiseTime += deltaTime * FlowSpeedValue( flowSpeed );
+	buzzTime += deltaTime * BuzzSpeedValue( buzzSpeed );
 	GLuint targets, normals;
 	CurrentTarget( targets, normals );
 	AdvanceAnimation( deltaTime );
@@ -688,6 +695,8 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals )
 	updateShader.Set( "uTargets", 2 );
 	updateShader.Set( "uNormals", 3 );
 	updateShader.Set( "uNoiseTime", noiseTime );
+	updateShader.Set( "uBuzz", BuzzValue( buzzAmount ) );
+	updateShader.Set( "uBuzzTime", buzzTime );
 	updateShader.Set( "uSurfaceFlow", SurfaceFlowValue( surfaceFlow ) );
 	updateShader.Set( "uHover", HoverValue( hover ) );
 	scatterPending = 0.0f;
@@ -796,6 +805,8 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_SURFACE_FLOW: surfaceFlow = value; break;
 	case PID_HOVER: hover = value; break;
 	case PID_FLOW_SPEED: flowSpeed = value; break;
+	case PID_BUZZ: buzzAmount = value; break;
+	case PID_BUZZ_SPEED: buzzSpeed = value; break;
 	case PID_PING_PONG: pingPong = value > 0.5f; break;
 	case PID_RESTART: restartOnSwitch = value > 0.5f; break;
 	case PID_SEQUENCES:
@@ -848,6 +859,8 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_SURFACE_FLOW: return surfaceFlow;
 	case PID_HOVER: return hover;
 	case PID_FLOW_SPEED: return flowSpeed;
+	case PID_BUZZ: return buzzAmount;
+	case PID_BUZZ_SPEED: return buzzSpeed;
 	case PID_PING_PONG: return pingPong ? 1.0f : 0.0f;
 	case PID_RESTART: return restartOnSwitch ? 1.0f : 0.0f;
 	case PID_SEQUENCES: return detectSequences ? 1.0f : 0.0f;
@@ -895,6 +908,7 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	case PID_RADIAL: snprintf( buffer, sizeof( buffer ), "%+.1f", RadialValue( radial ) ); return buffer;
 	case PID_ANIM_SPEED: snprintf( buffer, sizeof( buffer ), "%.2fx", AnimSpeedValue( animSpeed ) ); return buffer;
 	case PID_FLOW_SPEED: snprintf( buffer, sizeof( buffer ), "%.2fx", FlowSpeedValue( flowSpeed ) ); return buffer;
+	case PID_BUZZ_SPEED: snprintf( buffer, sizeof( buffer ), "%.2fx", BuzzSpeedValue( buzzSpeed ) ); return buffer;
 	default: return CFFGLPlugin::GetParameterDisplay( index );
 	}
 }
