@@ -320,7 +320,8 @@ void main()
 
 // One point per particle, positioned from the state texture. The particle index
 // comes from a static vertex buffer rather than gl_VertexID: Apple's driver
-// draws attribute-less points about 4x slower.
+// draws attribute-less points about 4x slower. Colour is worked out here, per
+// particle, so the extra look options cost next to nothing.
 static const char kRenderVS[] = R"(#version 410 core
 layout( location = 0 ) in float aIndex;
 
@@ -330,8 +331,15 @@ uniform int uTextureWidth;
 uniform mat4 uMVP;
 uniform float uPointSize;// in pixels at the reference distance
 uniform vec3 uColor;
+uniform vec3 uColor2;
+uniform int uColorMode;  // 0 speed, 1 height, 2 depth, 3 random
+uniform float uColorMix; // how much of Color 2
 uniform float uHeat;
 uniform float uBrightness;
+uniform float uTwinkle;
+uniform float uDepthFade;
+uniform float uDistance; // camera distance to the centre of the shape
+uniform float uTime;
 
 out vec4 vColor;
 
@@ -339,7 +347,9 @@ void main()
 {
 	int index = int( aIndex );
 	ivec2 texel = ivec2( index % uTextureWidth, index / uTextureWidth );
-	vec3 position = texelFetch( uPositions, texel, 0 ).xyz;
+	vec4 state = texelFetch( uPositions, texel, 0 );
+	vec3 position = state.xyz;
+	float seed = state.w;
 	vec3 velocity = texelFetch( uVelocities, texel, 0 ).xyz;
 
 	vec4 clip = uMVP * vec4( position, 1.0 );
@@ -348,13 +358,44 @@ void main()
 	float size = uPointSize / max( clip.w, 0.05 );
 	gl_PointSize = max( size, 1.0 );
 
-	// Fast particles glow towards white.
+	// 0 at the front of the shape, 1 at the back.
+	float depth = clamp( ( clip.w - uDistance + 1.2 ) / 2.4, 0.0, 1.0 );
 	float speed = length( velocity );
-	vec3 color = mix( uColor, vec3( 1.0 ), clamp( speed * 0.3, 0.0, 1.0 ) * uHeat );
+
+	// Share of Color 2. For the gradients, Color Mix slides the balance:
+	// 0 is all Color 1, 0.5 the full gradient, 1 all Color 2.
+	float weight = 0.0;
+	if( uColorMix > 0.0 )
+	{
+		if( uColorMode == 0 )
+			weight = clamp( speed * 4.0 * uColorMix * uColorMix, 0.0, 1.0 );
+		else if( uColorMode == 3 )
+			weight = fract( seed * 7919.37 ) < uColorMix ? 1.0 : 0.0;
+		else
+		{
+			float along = uColorMode == 1 ? clamp( 0.5 - 0.5 * position.y, 0.0, 1.0 ) : depth;
+			weight = smoothstep( 0.0, 1.0, along - 1.0 + 2.0 * uColorMix );
+		}
+	}
+	vec3 color = mix( uColor, uColor2, weight );
+
+	// Fast particles glow towards white.
+	color = mix( color, vec3( 1.0 ), clamp( speed * 0.3, 0.0, 1.0 ) * uHeat );
 
 	// Points smaller than a pixel are drawn at one pixel but dimmer, which avoids flicker.
-	float coverage = clamp( size * size, 0.0, 1.0 );
-	vColor = vec4( color, uBrightness * coverage );
+	float intensity = uBrightness * clamp( size * size, 0.0, 1.0 );
+
+	// Twinkle: each particle flares now and then at its own rate.
+	if( uTwinkle > 0.0 )
+	{
+		float rate = 1.5 + 3.0 * fract( seed * 3571.13 );
+		float flare = pow( 0.5 + 0.5 * sin( uTime * rate + seed * 6283.0 ), 6.0 );
+		intensity *= mix( 1.0, 0.25 + 3.0 * flare, uTwinkle );
+	}
+	// Depth Fade: the back of the shape sinks into darkness, like fog.
+	intensity *= 1.0 - uDepthFade * 0.9 * depth;
+
+	vColor = vec4( color, intensity );
 }
 )";
 

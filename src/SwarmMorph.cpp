@@ -76,6 +76,14 @@ enum ParamID
 	PID_COLOR_B,
 	PID_HEAT,
 	PID_BRIGHTNESS,
+	// Added after the first Look parameters so their IDs stay put.
+	PID_COLOR2_R,
+	PID_COLOR2_G,
+	PID_COLOR2_B,
+	PID_COLOR_MODE,
+	PID_COLOR_MIX,
+	PID_TWINKLE,
+	PID_DEPTH_FADE,
 
 	PID_SPIN,
 	PID_ROTATE_X,
@@ -257,7 +265,18 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_COLOR_B, "Color Blue", FF_TYPE_BLUE );
 	SetParamInfof( PID_HEAT, "Speed Glow", FF_TYPE_STANDARD );
 	SetParamInfof( PID_BRIGHTNESS, "Brightness", FF_TYPE_STANDARD );
-	for( unsigned int id = PID_PARTICLES; id <= PID_BRIGHTNESS; ++id )
+	SetParamInfof( PID_COLOR2_R, "Color 2", FF_TYPE_RED );
+	SetParamInfof( PID_COLOR2_G, "Color 2 Green", FF_TYPE_GREEN );
+	SetParamInfof( PID_COLOR2_B, "Color 2 Blue", FF_TYPE_BLUE );
+	SetOptionParamInfo( PID_COLOR_MODE, "Color Mode", 4, static_cast< float >( colorMode ) );
+	SetParamElementInfo( PID_COLOR_MODE, 0, "Speed", 0.0f );
+	SetParamElementInfo( PID_COLOR_MODE, 1, "Height", 1.0f );
+	SetParamElementInfo( PID_COLOR_MODE, 2, "Depth", 2.0f );
+	SetParamElementInfo( PID_COLOR_MODE, 3, "Random", 3.0f );
+	SetParamInfof( PID_COLOR_MIX, "Color Mix", FF_TYPE_STANDARD );
+	SetParamInfof( PID_TWINKLE, "Twinkle", FF_TYPE_STANDARD );
+	SetParamInfof( PID_DEPTH_FADE, "Depth Fade", FF_TYPE_STANDARD );
+	for( unsigned int id = PID_PARTICLES; id <= PID_DEPTH_FADE; ++id )
 		SetParamGroup( id, "Look" );
 
 	SetParamInfof( PID_SPIN, "Spin", FF_TYPE_STANDARD );
@@ -767,6 +786,13 @@ void SwarmMorph::Render()
 	renderShader.Set( "uColor", colorR, colorG, colorB );
 	renderShader.Set( "uHeat", heat );
 	renderShader.Set( "uBrightness", BrightnessValue( brightness ) );
+	renderShader.Set( "uColor2", color2R, color2G, color2B );
+	renderShader.Set( "uColorMode", colorMode );
+	renderShader.Set( "uColorMix", colorMix );
+	renderShader.Set( "uTwinkle", twinkle );
+	renderShader.Set( "uDepthFade", depthFade );
+	renderShader.Set( "uDistance", DistanceValue( zoom ) );
+	renderShader.Set( "uTime", simTime );
 
 	renderShader.Set( "uPositions", 0 );
 	renderShader.Set( "uVelocities", 1 );
@@ -824,6 +850,13 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_COLOR_B: colorB = value; break;
 	case PID_HEAT: heat = value; break;
 	case PID_BRIGHTNESS: brightness = value; break;
+	case PID_COLOR2_R: color2R = value; break;
+	case PID_COLOR2_G: color2G = value; break;
+	case PID_COLOR2_B: color2B = value; break;
+	case PID_COLOR_MODE: colorMode = std::min( std::max( static_cast< int >( std::lround( value ) ), 0 ), 3 ); break;
+	case PID_COLOR_MIX: colorMix = value; break;
+	case PID_TWINKLE: twinkle = value; break;
+	case PID_DEPTH_FADE: depthFade = value; break;
 	case PID_SPIN: spin = value; break;
 	case PID_ROTATE_X: rotateX = value; break;
 	case PID_ROTATE_Y: rotateY = value; break;
@@ -880,6 +913,13 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_COLOR_B: return colorB;
 	case PID_HEAT: return heat;
 	case PID_BRIGHTNESS: return brightness;
+	case PID_COLOR2_R: return color2R;
+	case PID_COLOR2_G: return color2G;
+	case PID_COLOR2_B: return color2B;
+	case PID_COLOR_MODE: return static_cast< float >( colorMode );
+	case PID_COLOR_MIX: return colorMix;
+	case PID_TWINKLE: return twinkle;
+	case PID_DEPTH_FADE: return depthFade;
 	case PID_SPIN: return spin;
 	case PID_ROTATE_X: return rotateX;
 	case PID_ROTATE_Y: return rotateY;
