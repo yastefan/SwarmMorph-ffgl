@@ -62,6 +62,11 @@ decade has. Macs with Intel or Apple Silicon are both supported.
 
 No models at hand? The [`examples/meshes`](examples/meshes) folder of this
 repository has a torus, a knot, a cube and a wave to start with.
+For animation, [`tools/blender/make_creature_animations.py`](tools/blender/make_creature_animations.py)
+builds ten seamlessly looping Alembic creatures in Blender: a pulsing
+jellyfish, manta ray, koi, sea serpent, butterfly, blooming lotus, sea
+anemone, kelp forest, DNA helix and octopus (see *Testing without Resolume*
+for the command).
 
 ## Ideas for live shows
 
@@ -270,6 +275,7 @@ renders offscreen on an OpenGL 4.1 core context and writes PNG frames:
 python3 tools/make_test_meshes.py
 python3 tools/make_test_sequences.py   # animated test patterns, ~100 MB, not checked in
 blender --background --factory-startup --python tools/blender/make_alembic_tests.py  # Alembic test files
+blender --background --factory-startup --python tools/blender/make_creature_animations.py  # looping Alembic creatures
 cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-debug
 ./build-debug/swarmmorph-harness --plugin build-debug/SwarmMorph.bundle --out renders \
