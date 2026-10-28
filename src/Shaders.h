@@ -34,6 +34,9 @@ uniform sampler2D uPositions; // xyz, w = per-particle random seed in [0, 1)
 uniform sampler2D uVelocities;// xyz, w unused
 uniform sampler2D uTargets;   // xyz = this particle's point on the target mesh
 uniform sampler2D uNormals;   // xyz = surface normal there; zero for point clouds
+uniform sampler2D uMorphTargets;// the same for the Morph To mesh
+uniform sampler2D uMorphNormals;
+uniform float uMorph;         // 0 = Target, 1 = Morph To
 
 uniform float uDeltaTime;
 uniform float uTime;
@@ -174,6 +177,16 @@ void main()
 	vec3 position = state.xyz;
 	vec3 velocity = texelFetch( uVelocities, texel, 0 ).xyz;
 	vec3 target = texelFetch( uTargets, texel, 0 ).xyz;
+	vec3 normal = texelFetch( uNormals, texel, 0 ).xyz;
+	// Morph fader: the particle's goal slides from its spot on one mesh to its
+	// spot on the other, so the swarm follows the fader with its usual physics.
+	if( uMorph > 0.0 )
+	{
+		target = mix( target, texelFetch( uMorphTargets, texel, 0 ).xyz, uMorph );
+		vec3 blended = mix( normal, texelFetch( uMorphNormals, texel, 0 ).xyz, uMorph );
+		float lengthSq = dot( blended, blended );
+		normal = lengthSq > 1e-8 ? blended * inversesqrt( lengthSq ) : vec3( 0.0 );
+	}
 
 	// Chaos gives each particle its own spring strength, so the swarm arrives in waves.
 	float strength = uAttraction * mix( 1.0, 0.5 + hash( seed * 91.7 ), uChaos );
@@ -212,7 +225,6 @@ void main()
 	// so they shape the swarm without ever overpowering the spring.
 	float potential;
 	vec3 field = curlNoise( position * uNoiseScale, uNoiseTime, potential );
-	vec3 normal = texelFetch( uNormals, texel, 0 ).xyz;
 
 	// In flight: full 3D swirl, relative to the remaining distance.
 	vec3 swirl = field * ( uShimmer + uTurbulence * min( distance, 1.5 ) );

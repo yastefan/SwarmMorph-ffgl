@@ -73,6 +73,10 @@ for the command).
 
 - **Morph on the beat:** use Resolume's BPM sync to animate **Target**, or
   map **Next** to a MIDI pad to step through your loaded models one by one.
+- **Morph on a fader:** load two models, set **Target** to the first and
+  **Morph To** to the second, and map **Morph** to a MIDI fader or your
+  crossfader. The swarm follows the fader with all its swirl and buzz; stop
+  halfway for a cloud that's neither one nor the other.
 - **Hit the kick:** map **Scatter** to a pad or an audio-reactive trigger for
   a burst that settles back into the shape.
 - **Fireflies:** turn **Surface Flow** down, **Buzz** and **Twinkle** up and
@@ -120,6 +124,8 @@ The parameters appear in Resolume in this order:
 |           | OBJ Sequences     | Detect numbered sequences; turn off to load such files as single meshes |
 |           | Target            | Slot the swarm flies to (1–8). Empty or failed slots are ignored. |
 |           | Next              | Jump to the next loaded slot (map it to a MIDI pad or the BPM) |
+|           | Morph             | Slide the swarm from Target (0) to Morph To (1) by hand, like a crossfader |
+|           | Morph To          | Slot that Morph blends towards (1–8) |
 | Morph     | Attraction        | Spring strength: how fast particles reach the new shape, and how firmly they hold it |
 |           | Damping           | Low values overshoot and wobble, high values glide in |
 |           | Chaos             | Per-particle variation of the attraction, so the swarm arrives in waves |

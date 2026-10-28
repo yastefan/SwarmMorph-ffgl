@@ -90,10 +90,11 @@ private:
 	void ReleaseSlotGL( Slot& slot );
 	void SelectNextLoadedSlot();
 	void CurrentTarget( GLuint& targets, GLuint& normals );
-	void AdvanceAnimation( float deltaTime );
+	float MorphTarget( GLuint& targets, GLuint& normals );// returns the morph amount, 0 if unused
+	void AdvanceAnimation( int slotIndex, float deltaTime );
 	double FramePosition( const Slot& slot ) const;
 	int ParticleCount() const;
-	void Simulate( float deltaTime, GLuint targets, GLuint normals );
+	void Simulate( float deltaTime, GLuint targets, GLuint normals, GLuint morphTargets, GLuint morphNormals, float morphAmount );
 	void Render();
 	float ViewportAspect() const;
 	swarm::Mat4 ViewMatrix() const;// world to camera
@@ -101,6 +102,7 @@ private:
 	Slot slots[ kNumSlots ];
 	GLuint fallbackTexture   = 0;
 	int activeSlot           = -1;// slot the swarm is heading to; -1 = fallback sphere
+	int morphActiveSlot      = -1;// slot Morph blends towards; -1 = none
 	StateBuffer state[ 2 ];// ping-ponged
 	int front                = 0;// index of the state holding the latest frame
 	GLuint emptyVAO          = 0;// core profile needs a bound VAO even without attributes
@@ -112,6 +114,8 @@ private:
 
 	// Parameters, stored as the host's normalised values.
 	int targetSlot       = 0;
+	int morphSlot        = 1;
+	float morph          = 0.0f;
 	float particles      = 0.5f;
 	float attraction     = 0.35f;
 	float damping        = 0.4f;
