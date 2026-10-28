@@ -18,6 +18,7 @@ struct MeshSequence
 {
 	Mesh firstFrame;
 	std::vector< std::vector< float > > frames;//!< xyz per vertex, per frame
+	float fps = 24.0f;                         //!< playback rate at 1x; OBJ files carry none, so Blender's default
 };
 
 // Ties each particle to a fixed spot on the surface: three vertices and their

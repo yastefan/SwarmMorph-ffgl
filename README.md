@@ -2,7 +2,7 @@
 
 **A particle swarm for Resolume that morphs between your 3D models.**
 
-Load up to eight `.obj` meshes, and SwarmMorph turns them into a cloud of up
+Load up to eight 3D models (`.obj` or Alembic `.abc`), and SwarmMorph turns them into a cloud of up
 to one million glowing particles. Switch the target mesh and the whole swarm
 takes off, swirls through the air and lands on the new shape. Animated meshes
 from Blender work too: the particles ride along with the moving surface.
@@ -13,7 +13,7 @@ HD and beyond.
 
 - Morph between up to 8 models at the push of a MIDI pad or on the beat
 - 10,000 to 1,048,576 particles
-- Animated meshes as OBJ sequences, e.g. exported from Blender
+- Animated meshes from Blender, Cinema 4D, Houdini or Maya as Alembic (`.abc`) or OBJ sequences
 - Wind, gusts, vortex and explode forces that bend the shape and let it spring back
 - Swirl, shimmer, scatter, speed glow and a free-spinning camera
 - Meshes load in the background, so loading a new file mid-show doesn't drop frames
@@ -52,7 +52,7 @@ decade has. Macs with Intel or Apple Silicon are both supported.
    You'll see a sphere of particles: that's the placeholder until you load a
    model.
 2. In the clip's parameters, open the **Meshes** group and choose an `.obj`
-   file for **Mesh 1**, another one for **Mesh 2**, and so on.
+   or `.abc` file for **Mesh 1**, another one for **Mesh 2**, and so on.
 3. Change **Target** to 2, and watch the swarm fly from the first model to
    the second.
 4. Now play: raise **Turbulence** for wilder flights, lower **Attraction** for
@@ -80,20 +80,21 @@ repository has a torus, a knot, a cube and a wave to start with.
 
 ## Getting models
 
-Any `.obj` file works: exports from Blender, Cinema 4D, Houdini, Maya, or
-models downloaded from the web. The polygon count hardly matters, since the
+Any `.obj` or Alembic `.abc` file works: exports from Blender, Cinema 4D,
+Houdini, Maya, or models downloaded from the web. The polygon count hardly matters, since the
 particles are spread evenly across the surface rather than placed on the
 vertices. Every model is centred and scaled to the same size; turn
 **Normalize** off to keep the original size and position.
 
-From Blender: select your object, then **File → Export → Wavefront (.obj)**.
+From Blender: **File → Export → Wavefront (.obj)** for a still model, or
+**File → Export → Alembic (.abc)** for anything that moves (see below).
 Materials and textures are ignored; only the shape counts.
 
 ## Parameters
 
 | Group  | Parameter        | What it does |
 |--------|------------------|--------------|
-| Meshes | Mesh 1–8         | `.obj` file per slot |
+| Meshes | Mesh 1–8         | `.obj` or `.abc` file per slot |
 |        | Normalize        | Centre each mesh and scale it to the unit sphere |
 |        | Target           | Slot the swarm flies to (1–8). Empty or failed slots are ignored. |
 |        | Next             | Jump to the next loaded slot (map it to a MIDI pad or the BPM) |
@@ -134,30 +135,52 @@ detail.
 | Swarm     | Surface Flow      | Particles stream along the surface of the shape, like a swarm crawling over it |
 |           | Hover             | Thickness of the loose particle layer floating above and below the surface |
 |           | Flow Speed        | How fast the swirls and streams change (0 freezes the pattern) |
-| Animation | Anim Speed        | Playback speed of OBJ sequences, 0–3× (default 1× = 24 fps) |
+| Animation | Anim Speed        | Playback speed of animations, 0–3× (1× = the file's own frame rate; 24 fps for OBJ sequences) |
 |           | Ping Pong         | Play forwards and backwards instead of looping |
 |           | Restart On Switch | Start the sequence from its first frame when it becomes the target |
 |           | OBJ Sequences     | Detect numbered sequences; turn off to load such files as single meshes |
 
-## Animated meshes (OBJ sequences)
+## Animated meshes
+
+Alembic is the easiest way to bring animation in: one file holds the whole
+animation, every object in the scene and its frame rate.
+
+### Alembic (.abc)
+
+In Blender: **File → Export → Alembic (.abc)**, set the frame range, export.
+Cinema 4D, Houdini and Maya export Alembic the same way. SwarmMorph reads:
+
+- all polygon and subdivision meshes in the file, merged into one shape
+- their object animation (moving, rotating, scaling, parenting) and their
+  deformation (armatures, cloth, shape keys, modifiers, all baked into the file)
+- the frame rate, so the animation plays at its original speed
+- point clouds, when the file contains points but no meshes
+
+A file with a single frame loads as a still model. Only the modern Ogawa
+format is supported (the default everywhere since 2013); very old HDF5-based
+files are rejected with a message in Resolume's log. Animations are loaded
+into memory completely, up to about 1 GB of vertex data.
+
+### OBJ sequences
 
 Pick any file of a numbered sequence (`walk_0001.obj`, `walk_0002.obj`, ...)
 in a mesh slot and SwarmMorph loads the whole sequence. A sequence needs at
 least three digits before `.obj` and two files with the same prefix in the
-same folder.
+same folder. In Blender: **File → Export → Wavefront (.obj)**, enable
+**Animation** and set the frame range. OBJ files carry no frame rate, so
+playback assumes 24 fps; use **Anim Speed** if your scene runs at a
+different rate.
 
-Exporting from Blender: **File → Export → Wavefront (.obj)**, enable
-**Animation** and set the frame range. Blender writes one numbered file per
-frame. Playback assumes 24 fps; use **Anim Speed** if your scene runs at a
-different rate. Loops blend the last frame into the first, so export a cycle
-without repeating the first frame at the end.
+### What works
 
 Each particle is tied to a fixed spot on the first frame's surface and
 follows that spot through the animation. This needs the same vertex count in
 every frame: character, cloth and deformer animations work; simulations that
 rebuild their mesh every frame (fluids, remeshing) don't, and frames with a
 different vertex count are skipped with a warning in Resolume's log. The
-whole animation is normalized as one, so it doesn't jitter in size.
+whole animation is normalized as one, so it doesn't jitter in size. Loops
+blend the last frame into the first, so export a cycle without repeating
+the first frame at the end.
 
 ## Troubleshooting
 
@@ -180,14 +203,18 @@ Clone with the FFGL SDK submodule:
 git clone --recursive git@github.com:yastefan/SwarmMorph-ffgl.git
 ```
 
-**macOS** (Xcode command line tools, CMake 3.20+):
+The first build downloads and compiles [Alembic](https://github.com/alembic/alembic)
+and [Imath](https://github.com/AcademySoftwareFoundation/Imath), which takes a
+few minutes. Pass `-DSWARMMORPH_WITH_ALEMBIC=OFF` to build without Alembic.
+
+**macOS** (Xcode command line tools, CMake 3.29+):
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-**Windows** (Visual Studio 2022 with C++, CMake 3.20+):
+**Windows** (Visual Studio 2022 with C++, CMake 3.29+):
 
 ```bash
 cmake -S . -B build -A x64
@@ -222,6 +249,7 @@ renders offscreen on an OpenGL 4.1 core context and writes PNG frames:
 ```bash
 python3 tools/make_test_meshes.py
 python3 tools/make_test_sequences.py   # animated test patterns, ~100 MB, not checked in
+blender --background --factory-startup --python tools/blender/make_alembic_tests.py  # Alembic test files
 cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-debug
 ./build-debug/swarmmorph-harness --plugin build-debug/SwarmMorph.bundle --out renders \
@@ -262,6 +290,8 @@ The current design avoids both: 270k particles take about 2 ms per frame and
 SwarmMorph is free software under the
 [GNU General Public License v3.0 or later](LICENSE).
 
-It builds on the [FFGL SDK](https://github.com/resolume/ffgl) (BSD 3-Clause)
-and, on Windows, links [GLEW](https://glew.sourceforge.net/) (BSD/MIT).
+It builds on the [FFGL SDK](https://github.com/resolume/ffgl) (BSD 3-Clause),
+[Alembic](https://github.com/alembic/alembic) (BSD 3-Clause) and
+[Imath](https://github.com/AcademySoftwareFoundation/Imath) (BSD 3-Clause),
+and on Windows links [GLEW](https://glew.sourceforge.net/) (BSD/MIT).
 Their license texts ship in the `licenses` folder of every release zip.

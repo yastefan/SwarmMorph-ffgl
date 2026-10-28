@@ -2,11 +2,13 @@
 #include "SwarmMorph.h"
 #include <ffglex/FFGLScopedFBOBinding.h>
 #include <algorithm>
+#include <cctype>
 #include <initializer_list>
 #include <cmath>
 #include <cstdio>
 #include <random>
 #include <thread>
+#include "AlembicLoader.h"
 #include "MathUtil.h"
 #include "MeshSampler.h"
 #include "Shaders.h"
@@ -163,6 +165,15 @@ float SurfaceFlowValue( float v ) { return 0.4f * v; }
 float HoverValue( float v ) { return 0.25f * v; }
 float FlowSpeedValue( float v ) { return 2.0f * v; }
 
+bool IsAlembicPath( const std::string& path )
+{
+	if( path.size() < 4 )
+		return false;
+	std::string extension = path.substr( path.size() - 4 );
+	std::transform( extension.begin(), extension.end(), extension.begin(), []( unsigned char c ) { return static_cast< char >( std::tolower( c ) ); } );
+	return extension == ".abc";
+}
+
 bool IsMeshParam( unsigned int index )
 {
 	return index >= PID_MESH_FIRST && index <= PID_MESH_LAST;
@@ -179,7 +190,10 @@ SwarmMorph::SwarmMorph()
 	for( int i = 0; i < kNumSlots; ++i )
 	{
 		std::string name = "Mesh " + std::to_string( i + 1 );
-		SetFileParamInfo( PID_MESH_FIRST + i, name.c_str(), { "obj" }, "" );
+		std::vector< std::string > extensions{ "obj" };
+		if( swarm::AlembicSupported() )
+			extensions.push_back( "abc" );
+		SetFileParamInfo( PID_MESH_FIRST + i, name.c_str(), extensions, "" );
 		SetParamGroup( PID_MESH_FIRST + i, "Meshes" );
 	}
 	SetParamInfo( PID_TARGET, "Target", FF_TYPE_INTEGER, 1.0f );
@@ -411,10 +425,20 @@ void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
 	std::thread( [ job, normalize, detectSequences, seed ]() {
 		try
 		{
-			std::vector< std::string > files = detectSequences ? swarm::FindObjSequence( job->path ) : std::vector< std::string >{ job->path };
 			swarm::MeshSequence sequence;
-			if( swarm::LoadObjSequence( files, sequence, job->error, job->warning ) )
+			bool loaded = false;
+			if( IsAlembicPath( job->path ) )
 			{
+				loaded = swarm::LoadAlembic( job->path, sequence, job->error, job->warning );
+			}
+			else
+			{
+				std::vector< std::string > files = detectSequences ? swarm::FindObjSequence( job->path ) : std::vector< std::string >{ job->path };
+				loaded = swarm::LoadObjSequence( files, sequence, job->error, job->warning );
+			}
+			if( loaded )
+			{
+				job->fps = sequence.fps;
 				std::vector< const std::vector< float >* > allFrames;
 				for( const std::vector< float >& frame : sequence.frames )
 					allFrames.push_back( &frame );
@@ -474,7 +498,9 @@ void SwarmMorph::UploadFinishedLoads()
 		else
 		{
 			UploadAnimation( slot, *job );
-			std::string message = "SwarmMorph: loaded " + std::to_string( slot.frames.size() ) + "-frame sequence " + job->path;
+			char fps[ 16 ];
+			snprintf( fps, sizeof( fps ), "%.3g", slot.fps );
+			std::string message = "SwarmMorph: loaded " + std::to_string( slot.frames.size() ) + "-frame animation at " + fps + " fps: " + job->path;
 			FFGLLog::LogToHost( message.c_str() );
 		}
 		slot.loaded = true;
@@ -500,6 +526,7 @@ void SwarmMorph::UploadAnimation( Slot& slot, LoadJob& job )
 	const GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 	glDrawBuffers( 2, drawBuffers );
 
+	slot.fps           = job.fps > 0.0f ? job.fps : 24.0f;
 	slot.playhead      = 0.0;
 	slot.evaluatedAt   = -1.0;
 	slot.evaluatedRows = 0;
@@ -524,7 +551,7 @@ void SwarmMorph::AdvanceAnimation( float deltaTime )
 	if( activeSlot < 0 || !slots[ activeSlot ].IsAnimated() )
 		return;
 	Slot& slot = slots[ activeSlot ];
-	slot.playhead += deltaTime * kSequenceFps * AnimSpeedValue( animSpeed );
+	slot.playhead += deltaTime * slot.fps * AnimSpeedValue( animSpeed );
 
 	double position = FramePosition( slot );
 	int rows        = ( ParticleCount() + kTextureWidth - 1 ) / kTextureWidth;
