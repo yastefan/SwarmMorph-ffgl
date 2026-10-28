@@ -41,6 +41,8 @@ enum ParamID
 
 	PID_TARGET,
 	PID_NEXT,
+	PID_MORPH,
+	PID_MORPH_TO,
 
 	PID_ATTRACTION,
 	PID_DAMPING,
@@ -220,6 +222,10 @@ SwarmMorph::SwarmMorph()
 	SetParamInfo( PID_TARGET, "Target", FF_TYPE_INTEGER, 1.0f );
 	SetParamRange( PID_TARGET, 1.0f, static_cast< float >( kNumSlots ) );
 	SetParamInfo( PID_NEXT, "Next", FF_TYPE_EVENT, false );
+	// A fader-driven morph: Morph slides the swarm's goal from Target to Morph To.
+	SetParamInfof( PID_MORPH, "Morph", FF_TYPE_STANDARD );
+	SetParamInfo( PID_MORPH_TO, "Morph To", FF_TYPE_INTEGER, 2.0f );
+	SetParamRange( PID_MORPH_TO, 1.0f, static_cast< float >( kNumSlots ) );
 
 	// How the swarm travels from one mesh to the next.
 	SetParamInfof( PID_ATTRACTION, "Attraction", FF_TYPE_STANDARD );
@@ -580,11 +586,11 @@ double SwarmMorph::FramePosition( const Slot& slot ) const
 	return std::fmod( slot.playhead, frameCount );
 }
 
-void SwarmMorph::AdvanceAnimation( float deltaTime )
+void SwarmMorph::AdvanceAnimation( int slotIndex, float deltaTime )
 {
-	if( activeSlot < 0 || !slots[ activeSlot ].IsAnimated() )
+	if( slotIndex < 0 || !slots[ slotIndex ].IsAnimated() )
 		return;
-	Slot& slot = slots[ activeSlot ];
+	Slot& slot = slots[ slotIndex ];
 	slot.playhead += deltaTime * slot.fps * AnimSpeedValue( animSpeed );
 
 	double position = FramePosition( slot );
@@ -662,6 +668,19 @@ void SwarmMorph::CurrentTarget( GLuint& targets, GLuint& normals )
 	}
 }
 
+float SwarmMorph::MorphTarget( GLuint& targets, GLuint& normals )
+{
+	int previous = morphActiveSlot;
+	morphActiveSlot = morph > 0.0f && slots[ morphSlot ].loaded && morphSlot != activeSlot ? morphSlot : -1;
+	if( morphActiveSlot != previous && morphActiveSlot >= 0 && restartOnSwitch )
+		slots[ morphActiveSlot ].playhead = 0.0;
+	if( morphActiveSlot < 0 )
+		return 0.0f;
+	targets = slots[ morphActiveSlot ].texture;
+	normals = slots[ morphActiveSlot ].normals;
+	return morph;
+}
+
 int SwarmMorph::ParticleCount() const
 {
 	return kMinParticles + static_cast< int >( ( kMaxParticles - kMinParticles ) * particles * particles );
@@ -688,13 +707,16 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	buzzTime += deltaTime * BuzzSpeedValue( buzzSpeed );
 	GLuint targets, normals;
 	CurrentTarget( targets, normals );
-	AdvanceAnimation( deltaTime );
-	Simulate( deltaTime, targets, normals );
+	GLuint morphTargets = targets, morphNormals = normals;
+	float morphAmount   = MorphTarget( morphTargets, morphNormals );
+	AdvanceAnimation( activeSlot, deltaTime );
+	AdvanceAnimation( morphActiveSlot, deltaTime );
+	Simulate( deltaTime, targets, normals, morphTargets, morphNormals, morphAmount );
 	Render();
 	return FF_SUCCESS;
 }
 
-void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals )
+void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals, GLuint morphTargets, GLuint morphNormals, float morphAmount )
 {
 	const StateBuffer& source = state[ front ];
 	const StateBuffer& dest   = state[ 1 - front ];
@@ -738,6 +760,9 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals )
 	updateShader.Set( "uVelocities", 1 );
 	updateShader.Set( "uTargets", 2 );
 	updateShader.Set( "uNormals", 3 );
+	updateShader.Set( "uMorphTargets", 4 );
+	updateShader.Set( "uMorphNormals", 5 );
+	updateShader.Set( "uMorph", morphAmount );
 	updateShader.Set( "uNoiseTime", noiseTime );
 	updateShader.Set( "uBuzz", BuzzValue( buzzAmount ) );
 	updateShader.Set( "uBuzzTime", buzzTime );
@@ -745,7 +770,7 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals )
 	updateShader.Set( "uHover", HoverValue( hover ) );
 	scatterPending = 0.0f;
 
-	ScopedTextureUnits textures( { source.positions, source.velocities, targets, normals } );
+	ScopedTextureUnits textures( { source.positions, source.velocities, targets, normals, morphTargets, morphNormals } );
 
 	ScopedVAOBinding vaoBinding( emptyVAO );
 	glDrawArrays( GL_TRIANGLES, 0, 3 );
@@ -817,6 +842,10 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	{
 	case PID_TARGET:
 		targetSlot = std::min( std::max( static_cast< int >( std::lround( value ) ) - 1, 0 ), kNumSlots - 1 );
+		break;
+	case PID_MORPH: morph = value; break;
+	case PID_MORPH_TO:
+		morphSlot = std::min( std::max( static_cast< int >( std::lround( value ) ) - 1, 0 ), kNumSlots - 1 );
 		break;
 	case PID_NEXT:
 		if( value > 0.5f && !nextPressed )
@@ -898,6 +927,8 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	{
 	case PID_TARGET: return static_cast< float >( targetSlot + 1 );
 	case PID_NEXT: return nextPressed ? 1.0f : 0.0f;
+	case PID_MORPH: return morph;
+	case PID_MORPH_TO: return static_cast< float >( morphSlot + 1 );
 	case PID_NORMALIZE: return normalizeMeshes ? 1.0f : 0.0f;
 	case PID_PARTICLES: return particles;
 	case PID_ATTRACTION: return attraction;
@@ -969,6 +1000,7 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	switch( index )
 	{
 	case PID_PARTICLES: snprintf( buffer, sizeof( buffer ), "%d", ParticleCount() ); return buffer;
+	case PID_MORPH: snprintf( buffer, sizeof( buffer ), "%.0f%%", morph * 100.0f ); return buffer;
 	case PID_ATTRACTION: snprintf( buffer, sizeof( buffer ), "%.2f", AttractionValue( attraction ) ); return buffer;
 	case PID_DAMPING: snprintf( buffer, sizeof( buffer ), "%.2f", DampingValue( damping ) ); return buffer;
 	case PID_TURBULENCE: snprintf( buffer, sizeof( buffer ), "%.2f", TurbulenceValue( turbulence ) ); return buffer;
