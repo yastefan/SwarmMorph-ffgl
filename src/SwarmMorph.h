@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "MathUtil.h"
 #include "MeshSampler.h"
 
 // Resolume source that turns OBJ meshes into a particle swarm. Switching the
@@ -94,6 +95,8 @@ private:
 	int ParticleCount() const;
 	void Simulate( float deltaTime, GLuint targets, GLuint normals );
 	void Render();
+	float ViewportAspect() const;
+	swarm::Mat4 ViewMatrix() const;// world to camera
 
 	Slot slots[ kNumSlots ];
 	GLuint fallbackTexture   = 0;
@@ -132,6 +135,8 @@ private:
 	float gusts          = 0.3f;
 	float vortex         = 0.5f;
 	float radial         = 0.5f;
+	float blowAway       = 0.0f;
+	bool wrapEdges       = true;
 	float animSpeed      = 1.0f / 3.0f;// 1x
 	bool pingPong        = false;
 	bool restartOnSwitch = true;

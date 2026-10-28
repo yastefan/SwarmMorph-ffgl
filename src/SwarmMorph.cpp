@@ -30,23 +30,46 @@ static CFFGLPluginInfo PluginInfo(
 
 namespace
 {
+// Declared in menu order: Resolume shows parameters by ID and opens a new
+// section whenever the group changes.
 enum ParamID
 {
 	PID_MESH_FIRST = 0,
 	PID_MESH_LAST  = PID_MESH_FIRST + SwarmMorph::kNumSlots - 1,
+	PID_NORMALIZE,
+	PID_SEQUENCES,
+
 	PID_TARGET,
 	PID_NEXT,
-	PID_NORMALIZE,
 
-	PID_PARTICLES,
 	PID_ATTRACTION,
 	PID_DAMPING,
 	PID_CHAOS,
 	PID_TURBULENCE,
-	PID_SHIMMER,
-	PID_NOISE_SCALE,
 	PID_SCATTER,
 
+	PID_SURFACE_FLOW,
+	PID_HOVER,
+	PID_SHIMMER,
+	PID_NOISE_SCALE,
+	PID_FLOW_SPEED,
+	PID_BUZZ,
+	PID_BUZZ_SPEED,
+
+	PID_WIND_X,
+	PID_WIND_Y,
+	PID_WIND_Z,
+	PID_GUSTS,
+	PID_BLOW_AWAY,
+	PID_WRAP,
+	PID_VORTEX,
+	PID_RADIAL,
+
+	PID_ANIM_SPEED,
+	PID_PING_PONG,
+	PID_RESTART,
+
+	PID_PARTICLES,
 	PID_POINT_SIZE,
 	PID_COLOR_R,
 	PID_COLOR_G,
@@ -58,25 +81,6 @@ enum ParamID
 	PID_ROTATE_X,
 	PID_ROTATE_Y,
 	PID_ZOOM,
-
-	// Appended so the IDs above stay stable for saved compositions.
-	PID_WIND_X,
-	PID_WIND_Y,
-	PID_WIND_Z,
-	PID_GUSTS,
-	PID_VORTEX,
-	PID_RADIAL,
-
-	PID_ANIM_SPEED,
-	PID_PING_PONG,
-	PID_RESTART,
-	PID_SEQUENCES,
-
-	PID_SURFACE_FLOW,
-	PID_HOVER,
-	PID_FLOW_SPEED,
-	PID_BUZZ,
-	PID_BUZZ_SPEED,
 };
 
 const float kPi              = 3.14159265358979f;
@@ -200,43 +204,41 @@ SwarmMorph::SwarmMorph()
 		SetFileParamInfo( PID_MESH_FIRST + i, name.c_str(), extensions, "" );
 		SetParamGroup( PID_MESH_FIRST + i, "Meshes" );
 	}
+	SetParamInfo( PID_NORMALIZE, "Normalize", FF_TYPE_BOOLEAN, normalizeMeshes );
+	SetParamInfo( PID_SEQUENCES, "OBJ Sequences", FF_TYPE_BOOLEAN, detectSequences );
+	SetParamGroup( PID_NORMALIZE, "Meshes" );
+	SetParamGroup( PID_SEQUENCES, "Meshes" );
+
 	SetParamInfo( PID_TARGET, "Target", FF_TYPE_INTEGER, 1.0f );
 	SetParamRange( PID_TARGET, 1.0f, static_cast< float >( kNumSlots ) );
 	SetParamInfo( PID_NEXT, "Next", FF_TYPE_EVENT, false );
-	SetParamInfo( PID_NORMALIZE, "Normalize", FF_TYPE_BOOLEAN, normalizeMeshes );
-	SetParamGroup( PID_NORMALIZE, "Meshes" );
 
-	SetParamInfof( PID_PARTICLES, "Particles", FF_TYPE_STANDARD );
+	// How the swarm travels from one mesh to the next.
 	SetParamInfof( PID_ATTRACTION, "Attraction", FF_TYPE_STANDARD );
 	SetParamInfof( PID_DAMPING, "Damping", FF_TYPE_STANDARD );
 	SetParamInfof( PID_CHAOS, "Chaos", FF_TYPE_STANDARD );
 	SetParamInfof( PID_TURBULENCE, "Turbulence", FF_TYPE_STANDARD );
-	SetParamInfof( PID_SHIMMER, "Shimmer", FF_TYPE_STANDARD );
-	SetParamInfof( PID_NOISE_SCALE, "Noise Scale", FF_TYPE_STANDARD );
 	SetParamInfo( PID_SCATTER, "Scatter", FF_TYPE_EVENT, false );
-	for( unsigned int id = PID_PARTICLES; id <= PID_SCATTER; ++id )
-		SetParamGroup( id, "Motion" );
+	for( unsigned int id = PID_ATTRACTION; id <= PID_SCATTER; ++id )
+		SetParamGroup( id, "Morph" );
 
-	SetParamInfof( PID_POINT_SIZE, "Point Size", FF_TYPE_STANDARD );
-	SetParamInfof( PID_COLOR_R, "Color", FF_TYPE_RED );
-	SetParamInfof( PID_COLOR_G, "Color Green", FF_TYPE_GREEN );
-	SetParamInfof( PID_COLOR_B, "Color Blue", FF_TYPE_BLUE );
-	SetParamInfof( PID_HEAT, "Speed Glow", FF_TYPE_STANDARD );
-	SetParamInfof( PID_BRIGHTNESS, "Brightness", FF_TYPE_STANDARD );
-	for( unsigned int id = PID_POINT_SIZE; id <= PID_BRIGHTNESS; ++id )
-		SetParamGroup( id, "Look" );
-
-	SetParamInfof( PID_SPIN, "Spin", FF_TYPE_STANDARD );
-	SetParamInfof( PID_ROTATE_X, "Rotate X", FF_TYPE_STANDARD );
-	SetParamInfof( PID_ROTATE_Y, "Rotate Y", FF_TYPE_STANDARD );
-	SetParamInfof( PID_ZOOM, "Zoom", FF_TYPE_STANDARD );
-	for( unsigned int id = PID_SPIN; id <= PID_ZOOM; ++id )
-		SetParamGroup( id, "Camera" );
+	// How it moves once it has arrived.
+	SetParamInfof( PID_SURFACE_FLOW, "Surface Flow", FF_TYPE_STANDARD );
+	SetParamInfof( PID_HOVER, "Hover", FF_TYPE_STANDARD );
+	SetParamInfof( PID_SHIMMER, "Shimmer", FF_TYPE_STANDARD );
+	SetParamInfof( PID_NOISE_SCALE, "Flow Scale", FF_TYPE_STANDARD );
+	SetParamInfof( PID_FLOW_SPEED, "Flow Speed", FF_TYPE_STANDARD );
+	SetParamInfof( PID_BUZZ, "Buzz", FF_TYPE_STANDARD );
+	SetParamInfof( PID_BUZZ_SPEED, "Buzz Speed", FF_TYPE_STANDARD );
+	for( unsigned int id = PID_SURFACE_FLOW; id <= PID_BUZZ_SPEED; ++id )
+		SetParamGroup( id, "Swarm" );
 
 	SetParamInfof( PID_WIND_X, "Wind X", FF_TYPE_STANDARD );
 	SetParamInfof( PID_WIND_Y, "Wind Y", FF_TYPE_STANDARD );
 	SetParamInfof( PID_WIND_Z, "Wind Z", FF_TYPE_STANDARD );
 	SetParamInfof( PID_GUSTS, "Gusts", FF_TYPE_STANDARD );
+	SetParamInfof( PID_BLOW_AWAY, "Blow Away", FF_TYPE_STANDARD );
+	SetParamInfo( PID_WRAP, "Wrap Edges", FF_TYPE_BOOLEAN, wrapEdges );
 	SetParamInfof( PID_VORTEX, "Vortex", FF_TYPE_STANDARD );
 	SetParamInfof( PID_RADIAL, "Explode", FF_TYPE_STANDARD );
 	for( unsigned int id = PID_WIND_X; id <= PID_RADIAL; ++id )
@@ -245,18 +247,25 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_ANIM_SPEED, "Anim Speed", FF_TYPE_STANDARD );
 	SetParamInfo( PID_PING_PONG, "Ping Pong", FF_TYPE_BOOLEAN, pingPong );
 	SetParamInfo( PID_RESTART, "Restart On Switch", FF_TYPE_BOOLEAN, restartOnSwitch );
-	SetParamInfo( PID_SEQUENCES, "OBJ Sequences", FF_TYPE_BOOLEAN, detectSequences );
-	for( unsigned int id = PID_ANIM_SPEED; id <= PID_SEQUENCES; ++id )
+	for( unsigned int id = PID_ANIM_SPEED; id <= PID_RESTART; ++id )
 		SetParamGroup( id, "Animation" );
 
-	SetParamInfof( PID_SURFACE_FLOW, "Surface Flow", FF_TYPE_STANDARD );
-	SetParamInfof( PID_HOVER, "Hover", FF_TYPE_STANDARD );
-	SetParamInfof( PID_FLOW_SPEED, "Flow Speed", FF_TYPE_STANDARD );
-	SetParamInfof( PID_BUZZ, "Buzz", FF_TYPE_STANDARD );
-	SetParamInfof( PID_BUZZ_SPEED, "Buzz Speed", FF_TYPE_STANDARD );
-	for( unsigned int id = PID_SURFACE_FLOW; id <= PID_BUZZ_SPEED; ++id )
-		SetParamGroup( id, "Swarm" );
+	SetParamInfof( PID_PARTICLES, "Particles", FF_TYPE_STANDARD );
+	SetParamInfof( PID_POINT_SIZE, "Point Size", FF_TYPE_STANDARD );
+	SetParamInfof( PID_COLOR_R, "Color", FF_TYPE_RED );
+	SetParamInfof( PID_COLOR_G, "Color Green", FF_TYPE_GREEN );
+	SetParamInfof( PID_COLOR_B, "Color Blue", FF_TYPE_BLUE );
+	SetParamInfof( PID_HEAT, "Speed Glow", FF_TYPE_STANDARD );
+	SetParamInfof( PID_BRIGHTNESS, "Brightness", FF_TYPE_STANDARD );
+	for( unsigned int id = PID_PARTICLES; id <= PID_BRIGHTNESS; ++id )
+		SetParamGroup( id, "Look" );
 
+	SetParamInfof( PID_SPIN, "Spin", FF_TYPE_STANDARD );
+	SetParamInfof( PID_ROTATE_X, "Rotate X", FF_TYPE_STANDARD );
+	SetParamInfof( PID_ROTATE_Y, "Rotate Y", FF_TYPE_STANDARD );
+	SetParamInfof( PID_ZOOM, "Zoom", FF_TYPE_STANDARD );
+	for( unsigned int id = PID_SPIN; id <= PID_ZOOM; ++id )
+		SetParamGroup( id, "Camera" );
 }
 
 SwarmMorph::~SwarmMorph() = default;
@@ -686,10 +695,26 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals )
 	updateShader.Set( "uShimmer", ShimmerValue( shimmer ) );
 	updateShader.Set( "uNoiseScale", NoiseScaleValue( noiseScale ) );
 	updateShader.Set( "uScatter", scatterPending );
-	updateShader.Set( "uWind", WindValue( windX ), WindValue( windY ), WindValue( windZ ) );
+	// Wind is set relative to the screen (X = right), so it keeps blowing the
+	// same way while the camera spins; the shader works in world space.
+	swarm::Mat4 view = ViewMatrix();
+	float wind[ 3 ]  = { WindValue( windX ), WindValue( windY ), WindValue( windZ ) };
+	float worldWind[ 3 ];
+	for( int i = 0; i < 3; ++i )
+		worldWind[ i ] = view.m[ i * 4 + 0 ] * wind[ 0 ] + view.m[ i * 4 + 1 ] * wind[ 1 ] + view.m[ i * 4 + 2 ] * wind[ 2 ];
+	updateShader.Set( "uWind", worldWind[ 0 ], worldWind[ 1 ], worldWind[ 2 ] );
 	updateShader.Set( "uGusts", gusts );
 	updateShader.Set( "uVortex", VortexValue( vortex ) );
 	updateShader.Set( "uRadial", RadialValue( radial ) );
+	updateShader.Set( "uBlowAway", blowAway );
+	updateShader.Set( "uWrap", wrapEdges ? 1.0f : 0.0f );
+	const float rotation[ 9 ] = { view.m[ 0 ], view.m[ 1 ], view.m[ 2 ], view.m[ 4 ], view.m[ 5 ], view.m[ 6 ], view.m[ 8 ], view.m[ 9 ], view.m[ 10 ] };
+	glUniformMatrix3fv( updateShader.FindUniform( "uViewRotation" ), 1, GL_FALSE, rotation );
+	updateShader.Set( "uViewTranslation", view.m[ 12 ], view.m[ 13 ], view.m[ 14 ] );
+	float tanHalfFov = std::tan( kFovY * 0.5f );
+	updateShader.Set( "uFrustum", tanHalfFov * ViewportAspect(), tanHalfFov );
+	float distance = DistanceValue( zoom );
+	updateShader.Set( "uDepthRange", std::max( distance - 3.0f, 0.3f ), distance + 3.0f );
 	updateShader.Set( "uPositions", 0 );
 	updateShader.Set( "uVelocities", 1 );
 	updateShader.Set( "uTargets", 2 );
@@ -710,17 +735,25 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals )
 	front = 1 - front;
 }
 
+float SwarmMorph::ViewportAspect() const
+{
+	return static_cast< float >( std::max< GLuint >( currentViewport.width, 1 ) ) /
+		   static_cast< float >( std::max< GLuint >( currentViewport.height, 1 ) );
+}
+
+swarm::Mat4 SwarmMorph::ViewMatrix() const
+{
+	return swarm::Mat4::Translation( 0.0f, 0.0f, -DistanceValue( zoom ) ) *
+		   swarm::Mat4::RotationX( AngleValue( rotateX ) * kPi / 180.0f ) *
+		   swarm::Mat4::RotationY( AngleValue( rotateY ) * kPi / 180.0f + spinAngle );
+}
+
 void SwarmMorph::Render()
 {
-	float width    = static_cast< float >( std::max< GLuint >( currentViewport.width, 1 ) );
-	float height   = static_cast< float >( std::max< GLuint >( currentViewport.height, 1 ) );
-	float distance = DistanceValue( zoom );
+	float height = static_cast< float >( std::max< GLuint >( currentViewport.height, 1 ) );
 
-	swarm::Mat4 projection = swarm::Mat4::Perspective( kFovY, width / height, 0.05f, 100.0f );
-	swarm::Mat4 view       = swarm::Mat4::Translation( 0.0f, 0.0f, -distance ) *
-						   swarm::Mat4::RotationX( AngleValue( rotateX ) * kPi / 180.0f ) *
-						   swarm::Mat4::RotationY( AngleValue( rotateY ) * kPi / 180.0f + spinAngle );
-	swarm::Mat4 mvp        = projection * view;
+	swarm::Mat4 projection = swarm::Mat4::Perspective( kFovY, ViewportAspect(), 0.05f, 100.0f );
+	swarm::Mat4 mvp        = projection * ViewMatrix();
 
 	// Point size is given in pixels at 1080p and at the default camera distance,
 	// so the look stays the same across output resolutions.
@@ -801,6 +834,8 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_GUSTS: gusts = value; break;
 	case PID_VORTEX: vortex = value; break;
 	case PID_RADIAL: radial = value; break;
+	case PID_BLOW_AWAY: blowAway = value; break;
+	case PID_WRAP: wrapEdges = value > 0.5f; break;
 	case PID_ANIM_SPEED: animSpeed = value; break;
 	case PID_SURFACE_FLOW: surfaceFlow = value; break;
 	case PID_HOVER: hover = value; break;
@@ -855,6 +890,8 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_GUSTS: return gusts;
 	case PID_VORTEX: return vortex;
 	case PID_RADIAL: return radial;
+	case PID_BLOW_AWAY: return blowAway;
+	case PID_WRAP: return wrapEdges ? 1.0f : 0.0f;
 	case PID_ANIM_SPEED: return animSpeed;
 	case PID_SURFACE_FLOW: return surfaceFlow;
 	case PID_HOVER: return hover;
@@ -906,6 +943,7 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	case PID_WIND_Z: snprintf( buffer, sizeof( buffer ), "%+.1f", WindValue( windZ ) ); return buffer;
 	case PID_VORTEX: snprintf( buffer, sizeof( buffer ), "%+.1f", VortexValue( vortex ) ); return buffer;
 	case PID_RADIAL: snprintf( buffer, sizeof( buffer ), "%+.1f", RadialValue( radial ) ); return buffer;
+	case PID_BLOW_AWAY: snprintf( buffer, sizeof( buffer ), "%.0f%%", blowAway * 100.0f ); return buffer;
 	case PID_ANIM_SPEED: snprintf( buffer, sizeof( buffer ), "%.2fx", AnimSpeedValue( animSpeed ) ); return buffer;
 	case PID_FLOW_SPEED: snprintf( buffer, sizeof( buffer ), "%.2fx", FlowSpeedValue( flowSpeed ) ); return buffer;
 	case PID_BUZZ_SPEED: snprintf( buffer, sizeof( buffer ), "%.2fx", BuzzSpeedValue( buzzSpeed ) ); return buffer;
