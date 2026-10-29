@@ -84,6 +84,7 @@ enum ParamID
 	PID_PARTICLES,
 	PID_POINT_SIZE,
 	PID_SOFTNESS,
+	PID_STREAKS,
 	PID_BRIGHTNESS,
 	PID_COLOR_H,// hue, saturation, brightness and alpha in a row make one colour picker
 	PID_COLOR_S,
@@ -211,6 +212,7 @@ void HsvToRgb( float h, float s, float v, float rgb[ 3 ] )
 		rgb[ i ]      = v * ( 1.0f - s * channel );
 	}
 }
+float StreakValue( float v ) { return 2.0f * v; }// 1 = back to where the particle was a frame ago
 float PathSpeedValue( float v ) { return 0.2f * v * v; }// loops per second; 1 = one loop in 5 s
 float AnimSpeedValue( float v ) { return 3.0f * v; }
 float SurfaceFlowValue( float v ) { return 0.4f * v; }
@@ -321,6 +323,7 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_PARTICLES, "Particles", FF_TYPE_STANDARD );
 	SetParamInfof( PID_POINT_SIZE, "Point Size", FF_TYPE_STANDARD );
 	SetParamInfof( PID_SOFTNESS, "Softness", FF_TYPE_STANDARD );
+	SetParamInfof( PID_STREAKS, "Streaks", FF_TYPE_STANDARD );
 	SetParamInfof( PID_BRIGHTNESS, "Brightness", FF_TYPE_STANDARD );
 	// Resolume shows hue, saturation, brightness and alpha in a row as one
 	// colour picker (named as in the FFGL SDK's example); alpha sets how
@@ -392,7 +395,8 @@ bool SwarmMorph::CreateGLResources()
 		FFGLLog::LogToHost( "SwarmMorph: update shader failed to compile" );
 		return false;
 	}
-	if( !renderShader.Compile( swarm::kRenderVS, swarm::kRenderFS ) )
+	if( !renderShader.Compile( swarm::RenderShaderSource( swarm::kRenderVSBody, false ), swarm::RenderShaderSource( swarm::kRenderFSBody, false ) ) ||
+		!streakShader.Compile( swarm::RenderShaderSource( swarm::kRenderVSBody, true ), swarm::RenderShaderSource( swarm::kRenderFSBody, true ) ) )
 	{
 		FFGLLog::LogToHost( "SwarmMorph: render shader failed to compile" );
 		return false;
@@ -454,6 +458,15 @@ bool SwarmMorph::CreateGLResources()
 		glEnableVertexAttribArray( 0 );
 		glVertexAttribPointer( 0, 1, GL_FLOAT, GL_FALSE, 0, (const void*)0 );
 	}
+	// Streaks draw six corners per particle, instanced: the same indices, one per instance.
+	glGenVertexArrays( 1, &streakVAO );
+	{
+		ScopedVAOBinding vaoBinding( streakVAO );
+		ScopedVBOBinding vboBinding( indexVBO );
+		glEnableVertexAttribArray( 0 );
+		glVertexAttribPointer( 0, 1, GL_FLOAT, GL_FALSE, 0, (const void*)0 );
+		glVertexAttribDivisor( 0, 1 );
+	}
 	front      = 0;
 	activeSlot = -1;
 
@@ -479,6 +492,7 @@ void SwarmMorph::ReleaseGLResources()
 {
 	updateShader.FreeGLResources();
 	renderShader.FreeGLResources();
+	streakShader.FreeGLResources();
 	skinShader.FreeGLResources();
 	for( StateBuffer& buffer : state )
 	{
@@ -489,8 +503,9 @@ void SwarmMorph::ReleaseGLResources()
 	}
 	glDeleteVertexArrays( 1, &emptyVAO );
 	glDeleteVertexArrays( 1, &indexVAO );
+	glDeleteVertexArrays( 1, &streakVAO );
 	glDeleteBuffers( 1, &indexVBO );
-	emptyVAO = indexVAO = indexVBO = 0;
+	emptyVAO = indexVAO = streakVAO = indexVBO = 0;
 	glDeleteTextures( 1, &fallbackTexture );
 	fallbackTexture = 0;
 	for( Slot& slot : slots )
@@ -950,47 +965,60 @@ void SwarmMorph::Render( GLuint normals )
 
 	glClear( GL_COLOR_BUFFER_BIT );
 
-	ScopedShaderBinding shaderBinding( renderShader.GetGLID() );
-	glUniformMatrix4fv( renderShader.FindUniform( "uMVP" ), 1, GL_FALSE, mvp.m );
-	renderShader.Set( "uPointSize", pointScale );
-	renderShader.Set( "uRefDistance", DistanceValue( 0.5f ) );
+	bool streaks           = streakLength > 0.0f;
+	ffglex::FFGLShader& shader = streaks ? streakShader : renderShader;
+	ScopedShaderBinding shaderBinding( shader.GetGLID() );
+	glUniformMatrix4fv( shader.FindUniform( "uMVP" ), 1, GL_FALSE, mvp.m );
+	shader.Set( "uPointSize", pointScale );
+	shader.Set( "uRefDistance", DistanceValue( 0.5f ) );
 	float rgb[ 3 ];
 	HsvToRgb( colorH, colorS, colorV * colorA, rgb );
-	renderShader.Set( "uColor", rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
-	renderShader.Set( "uHeat", heat );
-	renderShader.Set( "uBrightness", BrightnessValue( brightness ) * ( 1.0f + FlashValue( flash ) * beatEnvelope ) );
+	shader.Set( "uColor", rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
+	shader.Set( "uHeat", heat );
+	shader.Set( "uBrightness", BrightnessValue( brightness ) * ( 1.0f + FlashValue( flash ) * beatEnvelope ) );
 	HsvToRgb( color2H, color2S, color2V * color2A, rgb );
-	renderShader.Set( "uColor2", rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
-	renderShader.Set( "uSoftness", 0.35f + 3.65f * softness );// falloff exponent of each point
-	renderShader.Set( "uColorMode", colorMode );
-	renderShader.Set( "uColorMix", colorMix );
-	renderShader.Set( "uTwinkle", twinkle );
-	renderShader.Set( "uDepthFade", depthFade );
-	renderShader.Set( "uDistance", camera.distance );
-	renderShader.Set( "uTime", simTime );
-	renderShader.Set( "uBeat", beatEnvelope );
-	renderShader.Set( "uBeatSeed", beatSeed );
-	renderShader.Set( "uPulse", PulseValue( pulse ) );
-	renderShader.Set( "uShockwave", ShockwaveValue( shockwave ) );
-	renderShader.Set( "uWave", beatAge / waveDuration );
-	renderShader.Set( "uJitter", JitterValue( jitter ) );
-	renderShader.Set( "uNormals", 2 );
+	shader.Set( "uColor2", rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
+	shader.Set( "uSoftness", 0.35f + 3.65f * softness );// falloff exponent of each point
+	shader.Set( "uColorMode", colorMode );
+	shader.Set( "uColorMix", colorMix );
+	shader.Set( "uTwinkle", twinkle );
+	shader.Set( "uDepthFade", depthFade );
+	shader.Set( "uDistance", camera.distance );
+	shader.Set( "uTime", simTime );
+	shader.Set( "uBeat", beatEnvelope );
+	shader.Set( "uBeatSeed", beatSeed );
+	shader.Set( "uPulse", PulseValue( pulse ) );
+	shader.Set( "uShockwave", ShockwaveValue( shockwave ) );
+	shader.Set( "uWave", beatAge / waveDuration );
+	shader.Set( "uJitter", JitterValue( jitter ) );
+	shader.Set( "uPositions", 0 );
+	shader.Set( "uVelocities", 1 );
+	shader.Set( "uNormals", 2 );
+	shader.Set( "uTextureWidth", kTextureWidth );
 
-	renderShader.Set( "uPositions", 0 );
-	renderShader.Set( "uVelocities", 1 );
-	renderShader.Set( "uTextureWidth", kTextureWidth );
-
-	ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals } );
-
-	ScopedVAOBinding vaoBinding( indexVAO );
-	glEnable( GL_PROGRAM_POINT_SIZE );
 	glEnable( GL_BLEND );
 	glBlendFunc( GL_ONE, GL_ONE );
-	glDrawArrays( GL_POINTS, 0, ParticleCount() );
+	if( streaks )
+	{
+		// The other state buffer still holds the previous frame.
+		shader.Set( "uPreviousPositions", 3 );
+		shader.Set( "uStreakLength", StreakValue( streakLength ) );
+		shader.Set( "uViewport", static_cast< float >( currentViewport.width ), static_cast< float >( currentViewport.height ) );
+		ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals, state[ 1 - front ].positions } );
+		ScopedVAOBinding vaoBinding( streakVAO );
+		glDrawArraysInstanced( GL_TRIANGLES, 0, 6, ParticleCount() );
+	}
+	else
+	{
+		ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals } );
+		ScopedVAOBinding vaoBinding( indexVAO );
+		glEnable( GL_PROGRAM_POINT_SIZE );
+		glDrawArrays( GL_POINTS, 0, ParticleCount() );
+		glDisable( GL_PROGRAM_POINT_SIZE );
+	}
 	// FFGL requires the context to be returned in its default state.
 	glBlendFunc( GL_ONE, GL_ZERO );
 	glDisable( GL_BLEND );
-	glDisable( GL_PROGRAM_POINT_SIZE );
 }
 
 FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
@@ -1043,6 +1071,7 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_COLOR_A: colorA = value; break;
 	case PID_COLOR2_A: color2A = value; break;
 	case PID_SOFTNESS: softness = value; break;
+	case PID_STREAKS: streakLength = value; break;
 	case PID_COLOR_S: colorS = value; break;
 	case PID_COLOR_V: colorV = value; break;
 	case PID_HEAT: heat = value; break;
@@ -1122,6 +1151,7 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_COLOR_A: return colorA;
 	case PID_COLOR2_A: return color2A;
 	case PID_SOFTNESS: return softness;
+	case PID_STREAKS: return streakLength;
 	case PID_COLOR_S: return colorS;
 	case PID_COLOR_V: return colorV;
 	case PID_HEAT: return heat;
@@ -1194,6 +1224,11 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	case PID_TURBULENCE: snprintf( buffer, sizeof( buffer ), "%.2f", TurbulenceValue( turbulence ) ); return buffer;
 	case PID_NOISE_SCALE: snprintf( buffer, sizeof( buffer ), "%.2f", NoiseScaleValue( noiseScale ) ); return buffer;
 	case PID_POINT_SIZE: snprintf( buffer, sizeof( buffer ), "%.1f px", PointSizeValue( pointSize ) ); return buffer;
+	case PID_STREAKS:
+		if( streakLength <= 0.0f )
+			return const_cast< char* >( "off" );
+		snprintf( buffer, sizeof( buffer ), "%.1fx", StreakValue( streakLength ) );
+		return buffer;
 	case PID_SPIN: snprintf( buffer, sizeof( buffer ), "%.2f rps", SpinValue( spin ) ); return buffer;
 	case PID_ROTATE_X: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( rotateX ) ); return buffer;
 	case PID_ROTATE_Y: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( rotateY ) ); return buffer;

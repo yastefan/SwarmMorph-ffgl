@@ -115,9 +115,11 @@ private:
 	GLuint emptyVAO          = 0;// core profile needs a bound VAO even without attributes
 	GLuint indexVBO          = 0;// particle index per vertex, for the render pass
 	GLuint indexVAO          = 0;
+	GLuint streakVAO         = 0;// the same indices, one per instance, for streaks
 	ffglex::FFGLShader updateShader;
 	ffglex::FFGLShader skinShader;
 	ffglex::FFGLShader renderShader;
+	ffglex::FFGLShader streakShader;// renderShader drawing capsules from last frame's position
 
 	// Parameters, stored as the host's normalised values.
 	int targetSlot       = 0;
@@ -136,6 +138,7 @@ private:
 	float colorA         = 1.0f;
 	float color2A        = 1.0f;
 	float softness       = 0.45f;// matches the earlier fixed falloff
+	float streakLength   = 0.0f; // 0 = round points
 	float heat           = 0.4f;
 	float brightness     = 0.2f;
 	float color2H        = 0.059f;// orange

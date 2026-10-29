@@ -101,6 +101,9 @@ for the command).
   timeline (or a BPM-synced saw) for a continuous move that loops cleanly.
   **Fly Through** dives into the swarm and turns round inside it;
   **Vertigo** is a dolly zoom. Spin, Rotate and Zoom still work on top.
+- **Light trails:** put Resolume's **Trails** effect on the clip and raise
+  **Streaks** to about 0.5: blown-away and bursting particles draw smooth
+  curves instead of dotted lines.
 - **Fader weather:** put **Wind X/Y/Z**, **Vortex** and **Explode** on faders.
   All of them rest at the centre, so the shape stays calm until you move them.
 - **Blown away:** set some **Wind X**, then raise **Blow Away**. Particles
@@ -169,6 +172,7 @@ The parameters appear in Resolume in this order:
 | Look      | Particles         | Particle count, 10k – 1M |
 |           | Point Size        | In pixels at 1080p and the default distance; points grow more slowly than the shape when the camera comes close, so close-ups stay fine-grained |
 |           | Softness          | From crisp dots to soft glowing blobs; the total light stays the same |
+|           | Streaks           | Draw each particle as a streak back to where it was a frame ago (0.5 = exactly that far, 1 = twice). Fast particles then leave continuous lines under Resolume's Trails instead of dotted ones. Costs more GPU time than round points. |
 |           | Brightness        | Additive intensity |
 |           | Color             | Base colour (a colour picker; its alpha sets how strongly it shines) |
 |           | Color 2           | Second colour, used by Color Mode |
