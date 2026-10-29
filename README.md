@@ -16,7 +16,7 @@ HD and beyond.
 - Animated meshes from Blender, Cinema 4D, Houdini or Maya as Alembic (`.abc`) or OBJ sequences
 - Wind, gusts, vortex and explode forces that bend the shape and let it spring back
 - Blow particles off the shape and across the screen, wrapping around the edges
-- Swirl, shimmer, scatter and a free-spinning camera
+- Swirl, buzz and a free-spinning camera
 - Beat effects locked to Resolume's BPM: pulse, shockwave, burst, jitter, flash, spin steps and auto-advance
 - Two-colour gradients by speed, height or depth, random sparks, twinkle and depth fog
 - Meshes load in the background, so loading a new file mid-show doesn't drop frames
@@ -59,8 +59,8 @@ decade has. Macs with Intel or Apple Silicon are both supported.
 3. Change **Target** to 2, and watch the swarm fly from the first model to
    the second.
 4. Now play: raise **Turbulence** for wilder flights, lower **Attraction** for
-   slow, dreamy transitions, push **Wind X** for a gust, hit **Scatter** for
-   an explosion.
+   slow, dreamy transitions, push **Wind X** for a gust, raise **Burst** and
+   hit **Hit** for an explosion.
 
 No models at hand? The [`examples/meshes`](examples/meshes) folder of this
 repository has a torus, a knot, a cube and a wave to start with.
@@ -83,8 +83,9 @@ for the command).
   and the shape breathes with the music. Add **Auto Next** on 4 bars and the
   swarm changes models on the phrase. Set Beat Rate to Off and map **Hit**
   to a pad or an audio trigger to play them by hand.
-- **Hit the kick:** map **Scatter** to a pad or an audio-reactive trigger for
-  a burst that settles back into the shape.
+- **Hit the kick:** set **Beat Rate** to Off, **Burst** to 100 % and map
+  **Hit** to a pad or an audio-reactive trigger for an explosion that
+  settles back into the shape.
 - **Fireflies:** turn **Surface Flow** down, **Buzz** and **Twinkle** up and
   lower **Particles** with a bigger **Point Size**: every particle visibly
   buzzes and blinks around the model on its own.
@@ -140,10 +141,8 @@ The parameters appear in Resolume in this order:
 |           | Damping           | Low values overshoot and wobble, high values glide in |
 |           | Chaos             | Per-particle variation of the attraction, so the swarm arrives in waves |
 |           | Turbulence        | Swirl while travelling; fades out as particles arrive |
-|           | Scatter           | Kick all particles outward |
 | Swarm     | Surface Flow      | Particles stream along the surface of the shape, like a swarm crawling over it |
 |           | Hover             | Thickness of the loose particle layer floating above and below the surface |
-|           | Shimmer           | Small 3D swirl that stays once the shape has formed |
 |           | Flow Scale        | Size of the swirls and streams (also of Turbulence) |
 |           | Flow Speed        | How fast the swirls and streams change (0 freezes the pattern) |
 |           | Buzz              | Every particle wanders around its own spot on the surface, independently of its neighbours |
@@ -159,7 +158,7 @@ The parameters appear in Resolume in this order:
 |           | Decay             | How long each hit lasts, from a snap to a soft fade |
 |           | Pulse             | The shape swells along its surface |
 |           | Shockwave         | A ring runs out from the centre through the shape |
-|           | Burst             | A share of the particles (up to 50 %, different ones each time) flies off and returns |
+|           | Burst             | A share of the particles (up to all of them, different ones each time) flies off and returns |
 |           | Jitter            | Every particle twitches to its own side |
 |           | Flash             | Brightness spike |
 |           | Spin Step         | The camera turns a step (up to 90°) and springs into place |
@@ -168,13 +167,14 @@ The parameters appear in Resolume in this order:
 |           | Ping Pong         | Play forwards and backwards instead of looping |
 |           | Restart On Switch | Start the sequence from its first frame when it becomes the target |
 | Look      | Particles         | Particle count, 10k – 1M |
-|           | Point Size        | In pixels at 1080p |
-|           | Color             | Base colour |
-|           | Speed Glow        | Fast particles glow towards white |
+|           | Point Size        | In pixels at 1080p and the default distance; points grow more slowly than the shape when the camera comes close, so close-ups stay fine-grained |
+|           | Softness          | From crisp dots to soft glowing blobs; the total light stays the same |
 |           | Brightness        | Additive intensity |
+|           | Color             | Base colour (a colour picker; its alpha sets how strongly it shines) |
 |           | Color 2           | Second colour, used by Color Mode |
 |           | Color Mode        | How the two colours are spread: **Speed** (fast particles turn Color 2), **Height** (top to bottom), **Depth** (front to back) or **Random** (each particle one or the other) |
 |           | Color Mix         | How much Color 2: 0 = none, 0.5 = the full gradient, 1 = all. For Speed it is the sensitivity, for Random the share of particles. |
+|           | Speed Glow        | Moving particles light up and burn towards white, e.g. while they morph |
 |           | Twinkle           | Each particle flares up now and then at its own rhythm |
 |           | Depth Fade        | The back of the shape fades into darkness, like fog |
 | Camera    | Spin              | Continuous rotation, centre = still |
@@ -186,7 +186,7 @@ The parameters appear in Resolume in this order:
 **Morph** shapes the flight from one model to the next; **Swarm** is how the
 particles move once they have arrived.
 
-**Surface Flow**, **Hover**, **Turbulence** and **Shimmer** all come from one
+**Surface Flow**, **Hover** and **Turbulence** all come from one
 evolving curl-noise flow field: it never repeats and never clumps particles
 together, but neighbouring particles move together, so the shape itself seems
 to flow. **Buzz** is the opposite: each particle follows its own path, like a

@@ -49,11 +49,9 @@ enum ParamID
 	PID_DAMPING,
 	PID_CHAOS,
 	PID_TURBULENCE,
-	PID_SCATTER,
 
 	PID_SURFACE_FLOW,
 	PID_HOVER,
-	PID_SHIMMER,
 	PID_NOISE_SCALE,
 	PID_FLOW_SPEED,
 	PID_BUZZ,
@@ -85,17 +83,19 @@ enum ParamID
 
 	PID_PARTICLES,
 	PID_POINT_SIZE,
-	PID_COLOR_R,
-	PID_COLOR_G,
-	PID_COLOR_B,
-	PID_HEAT,
+	PID_SOFTNESS,
 	PID_BRIGHTNESS,
-	// Added after the first Look parameters so their IDs stay put.
-	PID_COLOR2_R,
-	PID_COLOR2_G,
-	PID_COLOR2_B,
+	PID_COLOR_H,// hue, saturation, brightness and alpha in a row make one colour picker
+	PID_COLOR_S,
+	PID_COLOR_V,
+	PID_COLOR_A,
+	PID_COLOR2_H,
+	PID_COLOR2_S,
+	PID_COLOR2_V,
+	PID_COLOR2_A,
 	PID_COLOR_MODE,
 	PID_COLOR_MIX,
+	PID_HEAT,
 	PID_TWINKLE,
 	PID_DEPTH_FADE,
 
@@ -110,7 +110,6 @@ enum ParamID
 
 const float kPi              = 3.14159265358979f;
 const float kFovY            = 40.0f * kPi / 180.0f;
-const float kScatterImpulse  = 3.0f;
 const int kTextureWidth      = SwarmMorph::kTextureWidth;
 
 GLuint CreateTexture( GLint internalFormat, GLenum format, GLenum type, int width, int height, const void* pixels )
@@ -169,7 +168,6 @@ GLuint CreateFloatTexture( GLint internalFormat, GLenum format, const float* pix
 float AttractionValue( float v ) { return 1.0f + 40.0f * v * v; }
 float DampingValue( float v ) { return 0.15f + 1.35f * v; }// fraction of critical damping
 float TurbulenceValue( float v ) { return v; }
-float ShimmerValue( float v ) { return 0.05f * v; }
 float NoiseScaleValue( float v ) { return 0.5f + 6.0f * v; }
 float PointSizeValue( float v ) { return 0.5f + 12.0f * v; }
 float BrightnessValue( float v ) { return 2.0f * v; }
@@ -197,10 +195,22 @@ const double kAutoNextBars[]   = { 0.0, 1.0, 2.0, 4.0, 8.0 };
 float DecaySeconds( float v ) { return 0.06f + 0.9f * v * v; }
 float PulseValue( float v ) { return 0.15f * v; }
 float ShockwaveValue( float v ) { return 0.4f * v; }
-float BurstValue( float v ) { return 0.5f * v; }// share of particles
+float BurstValue( float v ) { return v; }// share of particles
 float JitterValue( float v ) { return 0.15f * v; }
 float FlashValue( float v ) { return 3.0f * v; }
 float SpinStepValue( float v ) { return 90.0f * v; }// degrees per beat
+// Hue in [0, 1] (1 wraps to red), saturation and value in [0, 1].
+void HsvToRgb( float h, float s, float v, float rgb[ 3 ] )
+{
+	h = ( h - std::floor( h ) ) * 6.0f;
+	for( int i = 0; i < 3; ++i )
+	{
+		// Standard HSV: k runs round the hue wheel, offset per channel.
+		float k       = std::fmod( h + static_cast< float >( 5 - 2 * i ), 6.0f );
+		float channel = std::min( std::max( std::min( k, 4.0f - k ), 0.0f ), 1.0f );
+		rgb[ i ]      = v * ( 1.0f - s * channel );
+	}
+}
 float PathSpeedValue( float v ) { return 0.2f * v * v; }// loops per second; 1 = one loop in 5 s
 float AnimSpeedValue( float v ) { return 3.0f * v; }
 float SurfaceFlowValue( float v ) { return 0.4f * v; }
@@ -258,14 +268,12 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_DAMPING, "Damping", FF_TYPE_STANDARD );
 	SetParamInfof( PID_CHAOS, "Chaos", FF_TYPE_STANDARD );
 	SetParamInfof( PID_TURBULENCE, "Turbulence", FF_TYPE_STANDARD );
-	SetParamInfo( PID_SCATTER, "Scatter", FF_TYPE_EVENT, false );
-	for( unsigned int id = PID_ATTRACTION; id <= PID_SCATTER; ++id )
+	for( unsigned int id = PID_ATTRACTION; id <= PID_TURBULENCE; ++id )
 		SetParamGroup( id, "Morph" );
 
 	// How it moves once it has arrived.
 	SetParamInfof( PID_SURFACE_FLOW, "Surface Flow", FF_TYPE_STANDARD );
 	SetParamInfof( PID_HOVER, "Hover", FF_TYPE_STANDARD );
-	SetParamInfof( PID_SHIMMER, "Shimmer", FF_TYPE_STANDARD );
 	SetParamInfof( PID_NOISE_SCALE, "Flow Scale", FF_TYPE_STANDARD );
 	SetParamInfof( PID_FLOW_SPEED, "Flow Speed", FF_TYPE_STANDARD );
 	SetParamInfof( PID_BUZZ, "Buzz", FF_TYPE_STANDARD );
@@ -312,20 +320,26 @@ SwarmMorph::SwarmMorph()
 
 	SetParamInfof( PID_PARTICLES, "Particles", FF_TYPE_STANDARD );
 	SetParamInfof( PID_POINT_SIZE, "Point Size", FF_TYPE_STANDARD );
-	SetParamInfof( PID_COLOR_R, "Color", FF_TYPE_RED );
-	SetParamInfof( PID_COLOR_G, "Color Green", FF_TYPE_GREEN );
-	SetParamInfof( PID_COLOR_B, "Color Blue", FF_TYPE_BLUE );
-	SetParamInfof( PID_HEAT, "Speed Glow", FF_TYPE_STANDARD );
+	SetParamInfof( PID_SOFTNESS, "Softness", FF_TYPE_STANDARD );
 	SetParamInfof( PID_BRIGHTNESS, "Brightness", FF_TYPE_STANDARD );
-	SetParamInfof( PID_COLOR2_R, "Color 2", FF_TYPE_RED );
-	SetParamInfof( PID_COLOR2_G, "Color 2 Green", FF_TYPE_GREEN );
-	SetParamInfof( PID_COLOR2_B, "Color 2 Blue", FF_TYPE_BLUE );
+	// Resolume shows hue, saturation, brightness and alpha in a row as one
+	// colour picker (named as in the FFGL SDK's example); alpha sets how
+	// strongly that colour shines.
+	SetParamInfof( PID_COLOR_H, "Color", FF_TYPE_HUE );
+	SetParamInfof( PID_COLOR_S, "Color_Sat", FF_TYPE_SATURATION );
+	SetParamInfof( PID_COLOR_V, "Color_Bri", FF_TYPE_BRIGHTNESS );
+	SetParamInfof( PID_COLOR_A, "Color_Alpha", FF_TYPE_ALPHA );
+	SetParamInfof( PID_COLOR2_H, "Color 2", FF_TYPE_HUE );
+	SetParamInfof( PID_COLOR2_S, "Color 2_Sat", FF_TYPE_SATURATION );
+	SetParamInfof( PID_COLOR2_V, "Color 2_Bri", FF_TYPE_BRIGHTNESS );
+	SetParamInfof( PID_COLOR2_A, "Color 2_Alpha", FF_TYPE_ALPHA );
 	SetOptionParamInfo( PID_COLOR_MODE, "Color Mode", 4, static_cast< float >( colorMode ) );
 	SetParamElementInfo( PID_COLOR_MODE, 0, "Speed", 0.0f );
 	SetParamElementInfo( PID_COLOR_MODE, 1, "Height", 1.0f );
 	SetParamElementInfo( PID_COLOR_MODE, 2, "Depth", 2.0f );
 	SetParamElementInfo( PID_COLOR_MODE, 3, "Random", 3.0f );
 	SetParamInfof( PID_COLOR_MIX, "Color Mix", FF_TYPE_STANDARD );
+	SetParamInfof( PID_HEAT, "Speed Glow", FF_TYPE_STANDARD );
 	SetParamInfof( PID_TWINKLE, "Twinkle", FF_TYPE_STANDARD );
 	SetParamInfof( PID_DEPTH_FADE, "Depth Fade", FF_TYPE_STANDARD );
 	for( unsigned int id = PID_PARTICLES; id <= PID_DEPTH_FADE; ++id )
@@ -844,9 +858,7 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals, GLui
 	updateShader.Set( "uDampingRatio", DampingValue( damping ) );
 	updateShader.Set( "uChaos", chaos );
 	updateShader.Set( "uTurbulence", TurbulenceValue( turbulence ) );
-	updateShader.Set( "uShimmer", ShimmerValue( shimmer ) );
 	updateShader.Set( "uNoiseScale", NoiseScaleValue( noiseScale ) );
-	updateShader.Set( "uScatter", scatterPending );
 	// Wind is set relative to the screen (X = right), so it keeps blowing the
 	// same way while the camera spins; the shader works in world space.
 	Camera camera    = CurrentCamera();
@@ -882,7 +894,6 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals, GLui
 	updateShader.Set( "uBuzzTime", buzzTime );
 	updateShader.Set( "uSurfaceFlow", SurfaceFlowValue( surfaceFlow ) );
 	updateShader.Set( "uHover", HoverValue( hover ) );
-	scatterPending = 0.0f;
 
 	ScopedTextureUnits textures( { source.positions, source.velocities, targets, normals, morphTargets, morphNormals } );
 
@@ -935,18 +946,22 @@ void SwarmMorph::Render( GLuint normals )
 	// Point size is given in pixels at 1080p and at the default camera distance,
 	// so the look stays the same across output resolutions.
 	// A wider lens shows the shape smaller, so points shrink with it.
-	float pointScale = PointSizeValue( pointSize ) * ( height / 1080.0f ) * DistanceValue( 0.5f ) *
-					   std::tan( kFovY * 0.5f ) / std::tan( camera.fovY * 0.5f );
+	float pointScale = PointSizeValue( pointSize ) * ( height / 1080.0f ) * std::tan( kFovY * 0.5f ) / std::tan( camera.fovY * 0.5f );
 
 	glClear( GL_COLOR_BUFFER_BIT );
 
 	ScopedShaderBinding shaderBinding( renderShader.GetGLID() );
 	glUniformMatrix4fv( renderShader.FindUniform( "uMVP" ), 1, GL_FALSE, mvp.m );
 	renderShader.Set( "uPointSize", pointScale );
-	renderShader.Set( "uColor", colorR, colorG, colorB );
+	renderShader.Set( "uRefDistance", DistanceValue( 0.5f ) );
+	float rgb[ 3 ];
+	HsvToRgb( colorH, colorS, colorV * colorA, rgb );
+	renderShader.Set( "uColor", rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
 	renderShader.Set( "uHeat", heat );
 	renderShader.Set( "uBrightness", BrightnessValue( brightness ) * ( 1.0f + FlashValue( flash ) * beatEnvelope ) );
-	renderShader.Set( "uColor2", color2R, color2G, color2B );
+	HsvToRgb( color2H, color2S, color2V * color2A, rgb );
+	renderShader.Set( "uColor2", rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
+	renderShader.Set( "uSoftness", 0.35f + 3.65f * softness );// falloff exponent of each point
 	renderShader.Set( "uColorMode", colorMode );
 	renderShader.Set( "uColorMix", colorMix );
 	renderShader.Set( "uTwinkle", twinkle );
@@ -1022,22 +1037,19 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_DAMPING: damping = value; break;
 	case PID_CHAOS: chaos = value; break;
 	case PID_TURBULENCE: turbulence = value; break;
-	case PID_SHIMMER: shimmer = value; break;
 	case PID_NOISE_SCALE: noiseScale = value; break;
-	case PID_SCATTER:
-		if( value > 0.5f && !scatterPressed )
-			scatterPending = kScatterImpulse;
-		scatterPressed = value > 0.5f;
-		break;
 	case PID_POINT_SIZE: pointSize = value; break;
-	case PID_COLOR_R: colorR = value; break;
-	case PID_COLOR_G: colorG = value; break;
-	case PID_COLOR_B: colorB = value; break;
+	case PID_COLOR_H: colorH = value; break;
+	case PID_COLOR_A: colorA = value; break;
+	case PID_COLOR2_A: color2A = value; break;
+	case PID_SOFTNESS: softness = value; break;
+	case PID_COLOR_S: colorS = value; break;
+	case PID_COLOR_V: colorV = value; break;
 	case PID_HEAT: heat = value; break;
 	case PID_BRIGHTNESS: brightness = value; break;
-	case PID_COLOR2_R: color2R = value; break;
-	case PID_COLOR2_G: color2G = value; break;
-	case PID_COLOR2_B: color2B = value; break;
+	case PID_COLOR2_H: color2H = value; break;
+	case PID_COLOR2_S: color2S = value; break;
+	case PID_COLOR2_V: color2V = value; break;
 	case PID_COLOR_MODE: colorMode = std::min( std::max( static_cast< int >( std::lround( value ) ), 0 ), 3 ); break;
 	case PID_COLOR_MIX: colorMix = value; break;
 	case PID_TWINKLE: twinkle = value; break;
@@ -1104,18 +1116,19 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_DAMPING: return damping;
 	case PID_CHAOS: return chaos;
 	case PID_TURBULENCE: return turbulence;
-	case PID_SHIMMER: return shimmer;
 	case PID_NOISE_SCALE: return noiseScale;
-	case PID_SCATTER: return scatterPressed ? 1.0f : 0.0f;
 	case PID_POINT_SIZE: return pointSize;
-	case PID_COLOR_R: return colorR;
-	case PID_COLOR_G: return colorG;
-	case PID_COLOR_B: return colorB;
+	case PID_COLOR_H: return colorH;
+	case PID_COLOR_A: return colorA;
+	case PID_COLOR2_A: return color2A;
+	case PID_SOFTNESS: return softness;
+	case PID_COLOR_S: return colorS;
+	case PID_COLOR_V: return colorV;
 	case PID_HEAT: return heat;
 	case PID_BRIGHTNESS: return brightness;
-	case PID_COLOR2_R: return color2R;
-	case PID_COLOR2_G: return color2G;
-	case PID_COLOR2_B: return color2B;
+	case PID_COLOR2_H: return color2H;
+	case PID_COLOR2_S: return color2S;
+	case PID_COLOR2_V: return color2V;
 	case PID_COLOR_MODE: return static_cast< float >( colorMode );
 	case PID_COLOR_MIX: return colorMix;
 	case PID_TWINKLE: return twinkle;
