@@ -158,6 +158,7 @@ void Usage()
 		"  --set NAME=VALUE     set a parameter before the first frame\n"
 		"  --at FRAME NAME=VALUE  set a parameter at a frame (repeatable)\n"
 		"  --load-wait SEC      real time to wait for mesh loading (default: 2)\n"
+		"  --bpm N              send the host tempo and bar phase each frame, as Resolume does (4/4)\n"
 		"  --throughput         don't sync after each frame; only the wall time is meaningful\n"
 		"  --stale-gl-error     leave a GL error pending before instantiating, like Resolume sometimes does\n"
 		"  --list               print the plugin's parameters and exit\n" );
@@ -183,6 +184,7 @@ int main( int argc, char** argv )
 		double loadWait = 2.0;
 		bool listOnly   = false;
 		bool throughput = false;
+		double bpm      = 0.0;
 		bool staleError = false;
 		std::vector< Action > actions;
 
@@ -202,6 +204,7 @@ int main( int argc, char** argv )
 			else if( arg == "--fps" ) fps = std::stoi( next() );
 			else if( arg == "--every" ) every = std::stoi( next() );
 			else if( arg == "--load-wait" ) loadWait = std::stod( next() );
+			else if( arg == "--bpm" ) bpm = std::stod( next() );
 			else if( arg == "--list" ) listOnly = true;
 			else if( arg == "--throughput" ) throughput = true;
 			else if( arg == "--stale-gl-error" ) staleError = true;
@@ -314,6 +317,14 @@ int main( int argc, char** argv )
 
 			double time = frame * 1000.0 / fps;
 			Call( FF_SET_TIME, FromPointer( &time ), instance );
+			if( bpm > 0.0 )
+			{
+				double bars        = time / 1000.0 * bpm / 240.0;
+				SetBeatinfoStruct beat;
+				beat.bpm      = static_cast< float >( bpm );
+				beat.barPhase = static_cast< float >( bars - std::floor( bars ) );
+				Call( FF_SET_BEATINFO, FromPointer( &beat ), instance );
+			}
 
 			auto start = std::chrono::steady_clock::now();
 			if( Call( FF_PROCESS_OPENGL, FromPointer( &process ), instance ).UIntValue != FF_SUCCESS )

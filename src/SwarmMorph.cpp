@@ -67,6 +67,17 @@ enum ParamID
 	PID_VORTEX,
 	PID_RADIAL,
 
+	PID_BEAT_RATE,
+	PID_HIT,
+	PID_DECAY,
+	PID_PULSE,
+	PID_SHOCKWAVE,
+	PID_BURST,
+	PID_JITTER,
+	PID_FLASH,
+	PID_SPIN_STEP,
+	PID_AUTO_NEXT,
+
 	PID_ANIM_SPEED,
 	PID_PING_PONG,
 	PID_RESTART,
@@ -176,6 +187,16 @@ float CentredForce( float v, float maxForce )
 float WindValue( float v ) { return CentredForce( v, 10.0f ); }
 float VortexValue( float v ) { return CentredForce( v, 6.0f ); }
 float RadialValue( float v ) { return CentredForce( v, 6.0f ); }
+// Beat Rate and Auto Next options, as intervals in bars (4/4).
+const double kBeatIntervals[]  = { 0.0, 0.125, 0.25, 0.5, 1.0, 2.0 };
+const double kAutoNextBars[]   = { 0.0, 1.0, 2.0, 4.0, 8.0 };
+float DecaySeconds( float v ) { return 0.06f + 0.9f * v * v; }
+float PulseValue( float v ) { return 0.15f * v; }
+float ShockwaveValue( float v ) { return 0.4f * v; }
+float BurstValue( float v ) { return 0.5f * v; }// share of particles
+float JitterValue( float v ) { return 0.15f * v; }
+float FlashValue( float v ) { return 3.0f * v; }
+float SpinStepValue( float v ) { return 90.0f * v; }// degrees per beat
 float AnimSpeedValue( float v ) { return 3.0f * v; }
 float SurfaceFlowValue( float v ) { return 0.4f * v; }
 float HoverValue( float v ) { return 0.25f * v; }
@@ -257,6 +278,26 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_RADIAL, "Explode", FF_TYPE_STANDARD );
 	for( unsigned int id = PID_WIND_X; id <= PID_RADIAL; ++id )
 		SetParamGroup( id, "Forces" );
+
+	// Effects that fire on Resolume's beat grid, or by hand with Hit.
+	SetOptionParamInfo( PID_BEAT_RATE, "Beat Rate", 6, static_cast< float >( beatRate ) );
+	const char* rates[] = { "Off", "1/2 Beat", "1 Beat", "2 Beats", "1 Bar", "2 Bars" };
+	for( int i = 0; i < 6; ++i )
+		SetParamElementInfo( PID_BEAT_RATE, i, rates[ i ], static_cast< float >( i ) );
+	SetParamInfo( PID_HIT, "Hit", FF_TYPE_EVENT, false );
+	SetParamInfof( PID_DECAY, "Decay", FF_TYPE_STANDARD );
+	SetParamInfof( PID_PULSE, "Pulse", FF_TYPE_STANDARD );
+	SetParamInfof( PID_SHOCKWAVE, "Shockwave", FF_TYPE_STANDARD );
+	SetParamInfof( PID_BURST, "Burst", FF_TYPE_STANDARD );
+	SetParamInfof( PID_JITTER, "Jitter", FF_TYPE_STANDARD );
+	SetParamInfof( PID_FLASH, "Flash", FF_TYPE_STANDARD );
+	SetParamInfof( PID_SPIN_STEP, "Spin Step", FF_TYPE_STANDARD );
+	SetOptionParamInfo( PID_AUTO_NEXT, "Auto Next", 5, static_cast< float >( autoNext ) );
+	const char* bars[] = { "Off", "1 Bar", "2 Bars", "4 Bars", "8 Bars" };
+	for( int i = 0; i < 5; ++i )
+		SetParamElementInfo( PID_AUTO_NEXT, i, bars[ i ], static_cast< float >( i ) );
+	for( unsigned int id = PID_BEAT_RATE; id <= PID_AUTO_NEXT; ++id )
+		SetParamGroup( id, "Beat" );
 
 	SetParamInfof( PID_ANIM_SPEED, "Anim Speed", FF_TYPE_STANDARD );
 	SetParamInfo( PID_PING_PONG, "Ping Pong", FF_TYPE_BOOLEAN, pingPong );
@@ -681,6 +722,62 @@ float SwarmMorph::MorphTarget( GLuint& targets, GLuint& normals )
 	return morph;
 }
 
+void SwarmMorph::UpdateBeat( float deltaTime )
+{
+	bool kick  = hitPending;
+	hitPending = false;
+
+	// Resolume sends the tempo and the phase within the bar every frame.
+	if( bpm > 0.0f && std::isfinite( barPhase ) )
+	{
+		if( lastBarPhase >= 0.0f && barPhase < lastBarPhase - 0.5f )
+			++barCount;
+		double position = static_cast< double >( barCount ) + barPhase;
+		if( lastBarPhase >= 0.0f )
+		{
+			auto crossed = [ & ]( double interval ) {
+				return interval > 0.0 && std::floor( position / interval ) != std::floor( lastBarPosition / interval );
+			};
+			if( crossed( kBeatIntervals[ beatRate ] ) )
+				kick = true;
+			if( crossed( kAutoNextBars[ autoNext ] ) )
+				SelectNextLoadedSlot();
+		}
+		lastBarPhase    = barPhase;
+		lastBarPosition = position;
+	}
+
+	beatKick = kick;
+	if( kick )
+	{
+		beatAge  = 0.0f;
+		beatSeed = std::fmod( beatSeed + 0.618034f, 1.0f );// a new random pick per beat
+		stepTarget += SpinStepValue( spinStep ) * kPi / 180.0f;
+	}
+	else
+		beatAge += deltaTime;
+	beatEnvelope = std::exp( -beatAge / DecaySeconds( decay ) );
+
+	// The shockwave takes most of the time until the next beat to cross the
+	// shape (one beat when triggered by hand), so it moves with the music.
+	double beatSeconds = bpm > 0.0f ? 60.0 / bpm : 0.5;
+	double interval    = beatRate > 0 ? kBeatIntervals[ beatRate ] * 4.0 * beatSeconds : beatSeconds;
+	waveDuration       = static_cast< float >( std::min( std::max( 0.9 * interval, 0.3 ), 2.0 ) );
+
+	// Spin Step: the camera springs to the new angle with a little overshoot.
+	float omega = std::min( 2.0f * kPi / ( 0.25f + DecaySeconds( decay ) ), 20.0f );
+	for( int i = 0; i < 4; ++i )
+	{
+		float step = deltaTime / 4.0f;
+		stepVelocity += ( omega * omega * ( stepTarget - stepAngle ) - 1.2f * omega * stepVelocity ) * step;
+		stepAngle += stepVelocity * step;
+	}
+	// Keep both angles small without changing their difference.
+	float turns = std::floor( stepTarget / ( 2.0f * kPi ) ) * 2.0f * kPi;
+	stepTarget -= turns;
+	stepAngle -= turns;
+}
+
 int SwarmMorph::ParticleCount() const
 {
 	return kMinParticles + static_cast< int >( ( kMaxParticles - kMinParticles ) * particles * particles );
@@ -705,6 +802,7 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	UploadFinishedLoads();
 	noiseTime += deltaTime * FlowSpeedValue( flowSpeed );
 	buzzTime += deltaTime * BuzzSpeedValue( buzzSpeed );
+	UpdateBeat( deltaTime );
 	GLuint targets, normals;
 	CurrentTarget( targets, normals );
 	GLuint morphTargets = targets, morphNormals = normals;
@@ -712,7 +810,7 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	AdvanceAnimation( activeSlot, deltaTime );
 	AdvanceAnimation( morphActiveSlot, deltaTime );
 	Simulate( deltaTime, targets, normals, morphTargets, morphNormals, morphAmount );
-	Render();
+	Render( morphAmount > 0.5f ? morphNormals : normals );
 	return FF_SUCCESS;
 }
 
@@ -763,6 +861,9 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals, GLui
 	updateShader.Set( "uMorphTargets", 4 );
 	updateShader.Set( "uMorphNormals", 5 );
 	updateShader.Set( "uMorph", morphAmount );
+	updateShader.Set( "uBeatKick", beatKick ? 1.0f : 0.0f );
+	updateShader.Set( "uBeatSeed", beatSeed );
+	updateShader.Set( "uBurst", BurstValue( burst ) );
 	updateShader.Set( "uNoiseTime", noiseTime );
 	updateShader.Set( "uBuzz", BuzzValue( buzzAmount ) );
 	updateShader.Set( "uBuzzTime", buzzTime );
@@ -789,10 +890,10 @@ swarm::Mat4 SwarmMorph::ViewMatrix() const
 {
 	return swarm::Mat4::Translation( 0.0f, 0.0f, -DistanceValue( zoom ) ) *
 		   swarm::Mat4::RotationX( AngleValue( rotateX ) * kPi / 180.0f ) *
-		   swarm::Mat4::RotationY( AngleValue( rotateY ) * kPi / 180.0f + spinAngle );
+		   swarm::Mat4::RotationY( AngleValue( rotateY ) * kPi / 180.0f + spinAngle + stepAngle );
 }
 
-void SwarmMorph::Render()
+void SwarmMorph::Render( GLuint normals )
 {
 	float height = static_cast< float >( std::max< GLuint >( currentViewport.height, 1 ) );
 
@@ -810,7 +911,7 @@ void SwarmMorph::Render()
 	renderShader.Set( "uPointSize", pointScale );
 	renderShader.Set( "uColor", colorR, colorG, colorB );
 	renderShader.Set( "uHeat", heat );
-	renderShader.Set( "uBrightness", BrightnessValue( brightness ) );
+	renderShader.Set( "uBrightness", BrightnessValue( brightness ) * ( 1.0f + FlashValue( flash ) * beatEnvelope ) );
 	renderShader.Set( "uColor2", color2R, color2G, color2B );
 	renderShader.Set( "uColorMode", colorMode );
 	renderShader.Set( "uColorMix", colorMix );
@@ -818,12 +919,19 @@ void SwarmMorph::Render()
 	renderShader.Set( "uDepthFade", depthFade );
 	renderShader.Set( "uDistance", DistanceValue( zoom ) );
 	renderShader.Set( "uTime", simTime );
+	renderShader.Set( "uBeat", beatEnvelope );
+	renderShader.Set( "uBeatSeed", beatSeed );
+	renderShader.Set( "uPulse", PulseValue( pulse ) );
+	renderShader.Set( "uShockwave", ShockwaveValue( shockwave ) );
+	renderShader.Set( "uWave", beatAge / waveDuration );
+	renderShader.Set( "uJitter", JitterValue( jitter ) );
+	renderShader.Set( "uNormals", 2 );
 
 	renderShader.Set( "uPositions", 0 );
 	renderShader.Set( "uVelocities", 1 );
 	renderShader.Set( "uTextureWidth", kTextureWidth );
 
-	ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities } );
+	ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals } );
 
 	ScopedVAOBinding vaoBinding( indexVAO );
 	glEnable( GL_PROGRAM_POINT_SIZE );
@@ -844,6 +952,20 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 		targetSlot = std::min( std::max( static_cast< int >( std::lround( value ) ) - 1, 0 ), kNumSlots - 1 );
 		break;
 	case PID_MORPH: morph = value; break;
+	case PID_BEAT_RATE: beatRate = std::min( std::max( static_cast< int >( std::lround( value ) ), 0 ), 5 ); break;
+	case PID_HIT:
+		if( value > 0.5f && !hitPressed )
+			hitPending = true;
+		hitPressed = value > 0.5f;
+		break;
+	case PID_DECAY: decay = value; break;
+	case PID_PULSE: pulse = value; break;
+	case PID_SHOCKWAVE: shockwave = value; break;
+	case PID_BURST: burst = value; break;
+	case PID_JITTER: jitter = value; break;
+	case PID_FLASH: flash = value; break;
+	case PID_SPIN_STEP: spinStep = value; break;
+	case PID_AUTO_NEXT: autoNext = std::min( std::max( static_cast< int >( std::lround( value ) ), 0 ), 4 ); break;
 	case PID_MORPH_TO:
 		morphSlot = std::min( std::max( static_cast< int >( std::lround( value ) ) - 1, 0 ), kNumSlots - 1 );
 		break;
@@ -928,6 +1050,16 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_TARGET: return static_cast< float >( targetSlot + 1 );
 	case PID_NEXT: return nextPressed ? 1.0f : 0.0f;
 	case PID_MORPH: return morph;
+	case PID_BEAT_RATE: return static_cast< float >( beatRate );
+	case PID_HIT: return hitPressed ? 1.0f : 0.0f;
+	case PID_DECAY: return decay;
+	case PID_PULSE: return pulse;
+	case PID_SHOCKWAVE: return shockwave;
+	case PID_BURST: return burst;
+	case PID_JITTER: return jitter;
+	case PID_FLASH: return flash;
+	case PID_SPIN_STEP: return spinStep;
+	case PID_AUTO_NEXT: return static_cast< float >( autoNext );
 	case PID_MORPH_TO: return static_cast< float >( morphSlot + 1 );
 	case PID_NORMALIZE: return normalizeMeshes ? 1.0f : 0.0f;
 	case PID_PARTICLES: return particles;
@@ -1001,6 +1133,9 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	{
 	case PID_PARTICLES: snprintf( buffer, sizeof( buffer ), "%d", ParticleCount() ); return buffer;
 	case PID_MORPH: snprintf( buffer, sizeof( buffer ), "%.0f%%", morph * 100.0f ); return buffer;
+	case PID_DECAY: snprintf( buffer, sizeof( buffer ), "%.2f s", DecaySeconds( decay ) ); return buffer;
+	case PID_BURST: snprintf( buffer, sizeof( buffer ), "%.0f%%", BurstValue( burst ) * 100.0f ); return buffer;
+	case PID_SPIN_STEP: snprintf( buffer, sizeof( buffer ), "%.0f deg", SpinStepValue( spinStep ) ); return buffer;
 	case PID_ATTRACTION: snprintf( buffer, sizeof( buffer ), "%.2f", AttractionValue( attraction ) ); return buffer;
 	case PID_DAMPING: snprintf( buffer, sizeof( buffer ), "%.2f", DampingValue( damping ) ); return buffer;
 	case PID_TURBULENCE: snprintf( buffer, sizeof( buffer ), "%.2f", TurbulenceValue( turbulence ) ); return buffer;

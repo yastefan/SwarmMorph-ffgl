@@ -37,6 +37,9 @@ uniform sampler2D uNormals;   // xyz = surface normal there; zero for point clou
 uniform sampler2D uMorphTargets;// the same for the Morph To mesh
 uniform sampler2D uMorphNormals;
 uniform float uMorph;         // 0 = Target, 1 = Morph To
+uniform float uBeatKick;      // 1 only on the frame of a beat
+uniform float uBeatSeed;      // new random pick per beat
+uniform float uBurst;         // share of particles
 
 uniform float uDeltaTime;
 uniform float uTime;
@@ -218,6 +221,16 @@ void main()
 	float lean = 0.4 * ( 0.9 + 0.2 * hash( seed * 23.1 ) );
 	target += wind * ( lean / uAttraction );
 
+	// Burst: on the beat, a different share of the particles flies off. (The
+	// other beat effects are drawn by the render pass.)
+	if( uBeatKick > 0.0 && hash( seed * 53.1 + uBeatSeed * 17.3 ) < uBurst )
+	{
+		vec3 outward = dot( normal, normal ) > 0.0 ? normal : target / max( length( target ), 1e-4 );
+		vec3 random = vec3( hash( seed * 12.9 + uBeatSeed * 91.0 ), hash( seed * 78.2 + uBeatSeed * 47.0 ),
+							hash( seed * 37.7 + uBeatSeed * 13.0 ) ) * 2.0 - 1.0;
+		velocity += normalize( outward * 1.5 + random ) * ( 2.0 + 2.0 * hash( seed * 5.3 ) );
+	}
+
 	vec3 toTarget = target - position;
 	float distance = length( toTarget );
 
@@ -339,6 +352,7 @@ layout( location = 0 ) in float aIndex;
 
 uniform sampler2D uPositions;
 uniform sampler2D uVelocities;
+uniform sampler2D uNormals;// surface normal of each particle's spot; zero for point clouds
 uniform int uTextureWidth;
 uniform mat4 uMVP;
 uniform float uPointSize;// in pixels at the reference distance
@@ -352,8 +366,21 @@ uniform float uTwinkle;
 uniform float uDepthFade;
 uniform float uDistance; // camera distance to the centre of the shape
 uniform float uTime;
+// Beat effects, drawn as an offset from the simulated position so they land
+// exactly on the beat and fade with Decay, without waiting for the spring.
+uniform float uBeat;     // 1 on the beat, decaying
+uniform float uBeatSeed; // new random pick per beat
+uniform float uPulse;
+uniform float uShockwave;
+uniform float uWave;     // shockwave progress since the beat: 0 to 1
+uniform float uJitter;
 
 out vec4 vColor;
+
+float hash( float n )
+{
+	return fract( sin( n ) * 43758.5453123 );
+}
 
 void main()
 {
@@ -363,6 +390,32 @@ void main()
 	vec3 position = state.xyz;
 	float seed = state.w;
 	vec3 velocity = texelFetch( uVelocities, texel, 0 ).xyz;
+
+	if( uBeat > 0.001 )
+	{
+		vec3 normal = texelFetch( uNormals, texel, 0 ).xyz;
+		vec3 outward = dot( normal, normal ) > 0.0 ? normal : position / max( length( position ), 1e-4 );
+		// Pulse: the whole shape swells along its surface.
+		vec3 offset = outward * ( uPulse * uBeat );
+		// Jitter: every particle twitches to its own side.
+		vec3 random = vec3( hash( seed * 12.9 + uBeatSeed * 91.0 ), hash( seed * 78.2 + uBeatSeed * 47.0 ),
+							hash( seed * 37.7 + uBeatSeed * 13.0 ) ) * 2.0 - 1.0;
+		position += offset + random * ( uJitter * uBeat );
+	}
+
+	// Shockwave: a pressure ring runs out from the centre, timed to reach the
+	// edge just before the next beat. It slows down as it travels, like a real
+	// wave, and grows wider and fainter; the ring itself glows a little.
+	float waveGlow = 0.0;
+	if( uShockwave > 0.0 && uWave < 1.0 )
+	{
+		float radius = length( position );
+		float remaining = 1.0 - uWave;
+		float front = 1.4 * ( 1.0 - remaining * remaining );
+		float x = ( radius - front ) / ( 0.15 + 0.3 * uWave );
+		waveGlow = exp( -x * x ) * pow( remaining, 1.5 ) * smoothstep( 0.0, 0.08, uWave );
+		position += position / max( radius, 1e-4 ) * ( uShockwave * waveGlow );
+	}
 
 	vec4 clip = uMVP * vec4( position, 1.0 );
 	gl_Position = clip;
@@ -404,6 +457,7 @@ void main()
 		float flare = pow( 0.5 + 0.5 * sin( uTime * rate + seed * 6283.0 ), 6.0 );
 		intensity *= mix( 1.0, 0.25 + 3.0 * flare, uTwinkle );
 	}
+	intensity *= 1.0 + waveGlow * min( uShockwave * 5.0, 1.5 );
 	// Depth Fade: the back of the shape sinks into darkness, like fog.
 	intensity *= 1.0 - uDepthFade * 0.9 * depth;
 
