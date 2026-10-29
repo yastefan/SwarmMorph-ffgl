@@ -4,6 +4,25 @@
 
 namespace swarm
 {
+struct Vec3
+{
+	float x = 0.0f, y = 0.0f, z = 0.0f;
+
+	Vec3() = default;
+	Vec3( float x_, float y_, float z_ ) : x( x_ ), y( y_ ), z( z_ ) {}
+	Vec3 operator+( const Vec3& b ) const { return { x + b.x, y + b.y, z + b.z }; }
+	Vec3 operator-( const Vec3& b ) const { return { x - b.x, y - b.y, z - b.z }; }
+	Vec3 operator*( float s ) const { return { x * s, y * s, z * s }; }
+	float Dot( const Vec3& b ) const { return x * b.x + y * b.y + z * b.z; }
+	Vec3 Cross( const Vec3& b ) const { return { y * b.z - z * b.y, z * b.x - x * b.z, x * b.y - y * b.x }; }
+	float Length() const { return std::sqrt( Dot( *this ) ); }
+	Vec3 Normalized() const
+	{
+		float length = Length();
+		return length > 1e-12f ? *this * ( 1.0f / length ) : Vec3( 0.0f, 0.0f, 1.0f );
+	}
+};
+
 // Column-major 4x4 matrix, laid out the way glUniformMatrix4fv expects it.
 struct Mat4
 {
@@ -56,6 +75,31 @@ struct Mat4
 		r.m[ 2 ]  = -s;
 		r.m[ 8 ]  = s;
 		r.m[ 10 ] = c;
+		return r;
+	}
+
+	// World to camera for a camera at `eye` looking at `target`, Y up.
+	static Mat4 LookAt( const Vec3& eye, const Vec3& target )
+	{
+		Vec3 forward = ( target - eye ).Normalized();
+		Vec3 side    = forward.Cross( Vec3( 0.0f, 1.0f, 0.0f ) );
+		if( side.Length() < 1e-4f )// looking straight up or down
+			side = forward.Cross( Vec3( 0.0f, 0.0f, -1.0f ) );
+		side    = side.Normalized();
+		Vec3 up = side.Cross( forward );
+		Mat4 r  = Identity();
+		r.m[ 0 ]  = side.x;
+		r.m[ 4 ]  = side.y;
+		r.m[ 8 ]  = side.z;
+		r.m[ 1 ]  = up.x;
+		r.m[ 5 ]  = up.y;
+		r.m[ 9 ]  = up.z;
+		r.m[ 2 ]  = -forward.x;
+		r.m[ 6 ]  = -forward.y;
+		r.m[ 10 ] = -forward.z;
+		r.m[ 12 ] = -side.Dot( eye );
+		r.m[ 13 ] = -up.Dot( eye );
+		r.m[ 14 ] = forward.Dot( eye );
 		return r;
 	}
 

@@ -77,6 +77,8 @@ add_library(SwarmMorph MODULE
     src/SwarmMorph.cpp
     src/Shaders.h
     src/MathUtil.h
+    src/CameraPaths.h
+    src/CameraPaths.cpp
     ${FFGL_DIR}/source/lib/FFGLSDK.cpp
 )
 target_include_directories(SwarmMorph PRIVATE src ${FFGL_DIR}/source/lib)

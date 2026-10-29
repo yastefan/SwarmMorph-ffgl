@@ -420,8 +420,10 @@ void main()
 	vec4 clip = uMVP * vec4( position, 1.0 );
 	gl_Position = clip;
 
+	// Capped, so a camera flying through the swarm isn't blinded by points
+	// right in front of the lens.
 	float size = uPointSize / max( clip.w, 0.05 );
-	gl_PointSize = max( size, 1.0 );
+	gl_PointSize = clamp( size, 1.0, 48.0 );
 
 	// 0 at the front of the shape, 1 at the back.
 	float depth = clamp( ( clip.w - uDistance + 1.2 ) / 2.4, 0.0, 1.0 );
@@ -448,7 +450,7 @@ void main()
 	color = mix( color, vec3( 1.0 ), clamp( speed * 0.3, 0.0, 1.0 ) * uHeat );
 
 	// Points smaller than a pixel are drawn at one pixel but dimmer, which avoids flicker.
-	float intensity = uBrightness * clamp( size * size, 0.0, 1.0 );
+	float intensity = uBrightness * clamp( size * size, 0.0, 1.0 ) * smoothstep( 0.05, 0.4, clip.w );
 
 	// Twinkle: each particle flares now and then at its own rate.
 	if( uTwinkle > 0.0 )

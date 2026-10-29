@@ -9,6 +9,7 @@
 #include <random>
 #include <thread>
 #include "AlembicLoader.h"
+#include "CameraPaths.h"
 #include "MathUtil.h"
 #include "MeshSampler.h"
 #include "Shaders.h"
@@ -102,6 +103,9 @@ enum ParamID
 	PID_ROTATE_X,
 	PID_ROTATE_Y,
 	PID_ZOOM,
+	PID_PATH,
+	PID_PATH_POSITION,
+	PID_PATH_SPEED,
 };
 
 const float kPi              = 3.14159265358979f;
@@ -197,6 +201,7 @@ float BurstValue( float v ) { return 0.5f * v; }// share of particles
 float JitterValue( float v ) { return 0.15f * v; }
 float FlashValue( float v ) { return 3.0f * v; }
 float SpinStepValue( float v ) { return 90.0f * v; }// degrees per beat
+float PathSpeedValue( float v ) { return 0.2f * v * v; }// loops per second; 1 = one loop in 5 s
 float AnimSpeedValue( float v ) { return 3.0f * v; }
 float SurfaceFlowValue( float v ) { return 0.4f * v; }
 float HoverValue( float v ) { return 0.25f * v; }
@@ -330,7 +335,14 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_ROTATE_X, "Rotate X", FF_TYPE_STANDARD );
 	SetParamInfof( PID_ROTATE_Y, "Rotate Y", FF_TYPE_STANDARD );
 	SetParamInfof( PID_ZOOM, "Zoom", FF_TYPE_STANDARD );
-	for( unsigned int id = PID_SPIN; id <= PID_ZOOM; ++id )
+	// Camera moves: pick a path, then drive Path Position from a fader or the
+	// timeline, or let Path Speed run it.
+	SetOptionParamInfo( PID_PATH, "Path", swarm::CameraPathCount() + 1, 0.0f );
+	for( int i = 0; i <= swarm::CameraPathCount(); ++i )
+		SetParamElementInfo( PID_PATH, i, swarm::CameraPathName( i ), static_cast< float >( i ) );
+	SetParamInfof( PID_PATH_POSITION, "Path Position", FF_TYPE_STANDARD );
+	SetParamInfof( PID_PATH_SPEED, "Path Speed", FF_TYPE_STANDARD );
+	for( unsigned int id = PID_SPIN; id <= PID_PATH_SPEED; ++id )
 		SetParamGroup( id, "Camera" );
 }
 
@@ -798,6 +810,7 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	deltaTime = std::min( std::max( deltaTime, 0.0f ), 1.0f / 20.0f );
 	simTime += deltaTime;
 	spinAngle += SpinValue( spin ) * 2.0f * kPi * deltaTime;
+	pathTravel = std::fmod( pathTravel + deltaTime * PathSpeedValue( pathSpeed ), 1.0f );
 
 	UploadFinishedLoads();
 	noiseTime += deltaTime * FlowSpeedValue( flowSpeed );
@@ -836,7 +849,8 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals, GLui
 	updateShader.Set( "uScatter", scatterPending );
 	// Wind is set relative to the screen (X = right), so it keeps blowing the
 	// same way while the camera spins; the shader works in world space.
-	swarm::Mat4 view = ViewMatrix();
+	Camera camera    = CurrentCamera();
+	const swarm::Mat4& view = camera.view;
 	float wind[ 3 ]  = { WindValue( windX ), WindValue( windY ), WindValue( windZ ) };
 	float worldWind[ 3 ];
 	for( int i = 0; i < 3; ++i )
@@ -850,10 +864,9 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals, GLui
 	const float rotation[ 9 ] = { view.m[ 0 ], view.m[ 1 ], view.m[ 2 ], view.m[ 4 ], view.m[ 5 ], view.m[ 6 ], view.m[ 8 ], view.m[ 9 ], view.m[ 10 ] };
 	glUniformMatrix3fv( updateShader.FindUniform( "uViewRotation" ), 1, GL_FALSE, rotation );
 	updateShader.Set( "uViewTranslation", view.m[ 12 ], view.m[ 13 ], view.m[ 14 ] );
-	float tanHalfFov = std::tan( kFovY * 0.5f );
+	float tanHalfFov = std::tan( camera.fovY * 0.5f );
 	updateShader.Set( "uFrustum", tanHalfFov * ViewportAspect(), tanHalfFov );
-	float distance = DistanceValue( zoom );
-	updateShader.Set( "uDepthRange", std::max( distance - 3.0f, 0.3f ), distance + 3.0f );
+	updateShader.Set( "uDepthRange", std::max( camera.distance - 3.0f, 0.3f ), camera.distance + 3.0f );
 	updateShader.Set( "uPositions", 0 );
 	updateShader.Set( "uVelocities", 1 );
 	updateShader.Set( "uTargets", 2 );
@@ -886,23 +899,44 @@ float SwarmMorph::ViewportAspect() const
 		   static_cast< float >( std::max< GLuint >( currentViewport.height, 1 ) );
 }
 
-swarm::Mat4 SwarmMorph::ViewMatrix() const
+SwarmMorph::Camera SwarmMorph::CurrentCamera() const
 {
-	return swarm::Mat4::Translation( 0.0f, 0.0f, -DistanceValue( zoom ) ) *
-		   swarm::Mat4::RotationX( AngleValue( rotateX ) * kPi / 180.0f ) *
-		   swarm::Mat4::RotationY( AngleValue( rotateY ) * kPi / 180.0f + spinAngle + stepAngle );
+	// Rotate X/Y, Spin and Spin Step turn the shape; the camera itself either
+	// sits in front of it or travels along a path.
+	swarm::Mat4 turn = swarm::Mat4::RotationX( AngleValue( rotateX ) * kPi / 180.0f ) *
+					   swarm::Mat4::RotationY( AngleValue( rotateY ) * kPi / 180.0f + spinAngle + stepAngle );
+	Camera camera;
+	if( cameraPath > 0 )
+	{
+		// Zoom scales the whole path, so it frames tighter or wider.
+		float scale            = DistanceValue( zoom ) / DistanceValue( 0.5f );
+		swarm::CameraPose pose = swarm::EvaluateCameraPath( cameraPath, pathPosition + pathTravel );
+		camera.view            = swarm::Mat4::LookAt( pose.eye * scale, pose.target * scale ) * turn;
+		camera.fovY            = pose.fovY;
+		camera.distance        = ( pose.eye * scale ).Length();
+	}
+	else
+	{
+		camera.view     = swarm::Mat4::Translation( 0.0f, 0.0f, -DistanceValue( zoom ) ) * turn;
+		camera.fovY     = kFovY;
+		camera.distance = DistanceValue( zoom );
+	}
+	return camera;
 }
 
 void SwarmMorph::Render( GLuint normals )
 {
 	float height = static_cast< float >( std::max< GLuint >( currentViewport.height, 1 ) );
 
-	swarm::Mat4 projection = swarm::Mat4::Perspective( kFovY, ViewportAspect(), 0.05f, 100.0f );
-	swarm::Mat4 mvp        = projection * ViewMatrix();
+	Camera camera          = CurrentCamera();
+	swarm::Mat4 projection = swarm::Mat4::Perspective( camera.fovY, ViewportAspect(), 0.05f, 100.0f );
+	swarm::Mat4 mvp        = projection * camera.view;
 
 	// Point size is given in pixels at 1080p and at the default camera distance,
 	// so the look stays the same across output resolutions.
-	float pointScale = PointSizeValue( pointSize ) * ( height / 1080.0f ) * DistanceValue( 0.5f );
+	// A wider lens shows the shape smaller, so points shrink with it.
+	float pointScale = PointSizeValue( pointSize ) * ( height / 1080.0f ) * DistanceValue( 0.5f ) *
+					   std::tan( kFovY * 0.5f ) / std::tan( camera.fovY * 0.5f );
 
 	glClear( GL_COLOR_BUFFER_BIT );
 
@@ -917,7 +951,7 @@ void SwarmMorph::Render( GLuint normals )
 	renderShader.Set( "uColorMix", colorMix );
 	renderShader.Set( "uTwinkle", twinkle );
 	renderShader.Set( "uDepthFade", depthFade );
-	renderShader.Set( "uDistance", DistanceValue( zoom ) );
+	renderShader.Set( "uDistance", camera.distance );
 	renderShader.Set( "uTime", simTime );
 	renderShader.Set( "uBeat", beatEnvelope );
 	renderShader.Set( "uBeatSeed", beatSeed );
@@ -1012,6 +1046,9 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_ROTATE_X: rotateX = value; break;
 	case PID_ROTATE_Y: rotateY = value; break;
 	case PID_ZOOM: zoom = value; break;
+	case PID_PATH: cameraPath = std::min( std::max( static_cast< int >( std::lround( value ) ), 0 ), swarm::CameraPathCount() ); break;
+	case PID_PATH_POSITION: pathPosition = value; break;
+	case PID_PATH_SPEED: pathSpeed = value; break;
 	case PID_WIND_X: windX = value; break;
 	case PID_WIND_Y: windY = value; break;
 	case PID_WIND_Z: windZ = value; break;
@@ -1087,6 +1124,9 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_ROTATE_X: return rotateX;
 	case PID_ROTATE_Y: return rotateY;
 	case PID_ZOOM: return zoom;
+	case PID_PATH: return static_cast< float >( cameraPath );
+	case PID_PATH_POSITION: return pathPosition;
+	case PID_PATH_SPEED: return pathSpeed;
 	case PID_WIND_X: return windX;
 	case PID_WIND_Y: return windY;
 	case PID_WIND_Z: return windZ;
@@ -1145,6 +1185,12 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	case PID_ROTATE_X: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( rotateX ) ); return buffer;
 	case PID_ROTATE_Y: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( rotateY ) ); return buffer;
 	case PID_ZOOM: snprintf( buffer, sizeof( buffer ), "%.2f", DistanceValue( zoom ) ); return buffer;
+	case PID_PATH_POSITION: snprintf( buffer, sizeof( buffer ), "%.0f%%", pathPosition * 100.0f ); return buffer;
+	case PID_PATH_SPEED:
+		if( pathSpeed <= 0.0f )
+			return const_cast< char* >( "off" );
+		snprintf( buffer, sizeof( buffer ), "%.1f s/loop", 1.0f / PathSpeedValue( pathSpeed ) );
+		return buffer;
 	case PID_WIND_X: snprintf( buffer, sizeof( buffer ), "%+.1f", WindValue( windX ) ); return buffer;
 	case PID_WIND_Y: snprintf( buffer, sizeof( buffer ), "%+.1f", WindValue( windY ) ); return buffer;
 	case PID_WIND_Z: snprintf( buffer, sizeof( buffer ), "%+.1f", WindValue( windZ ) ); return buffer;
