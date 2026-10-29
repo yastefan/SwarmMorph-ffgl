@@ -96,6 +96,10 @@ for the command).
   to Color 1 as it settles.
 - **Sparks:** Color Mode Random, **Color Mix** around 0.1 and some
   **Twinkle** sprinkle a few golden sparks into a blue swarm.
+- **Camera moves:** pick a **Path** and put **Path Position** on the
+  timeline (or a BPM-synced saw) for a continuous move that loops cleanly.
+  **Fly Through** dives into the swarm and turns round inside it;
+  **Vertigo** is a dolly zoom. Spin, Rotate and Zoom still work on top.
 - **Fader weather:** put **Wind X/Y/Z**, **Vortex** and **Explode** on faders.
   All of them rest at the centre, so the shape stays calm until you move them.
 - **Blown away:** set some **Wind X**, then raise **Blow Away**. Particles
@@ -175,6 +179,9 @@ The parameters appear in Resolume in this order:
 |           | Depth Fade        | The back of the shape fades into darkness, like fog |
 | Camera    | Spin              | Continuous rotation, centre = still |
 |           | Rotate X/Y, Zoom  | Camera orientation and distance |
+|           | Path              | Camera move: Off, Orbit, Wave Orbit, Spiral, Fly Through, Close Pass, Crane or Vertigo |
+|           | Path Position     | Where on the path the camera is (0–100 %); 0 and 100 % are the same shot, so loops are seamless |
+|           | Path Speed        | Let the camera travel by itself, up to one loop every 5 s (adds to Path Position) |
 
 **Morph** shapes the flight from one model to the next; **Swarm** is how the
 particles move once they have arrived.

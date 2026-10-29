@@ -97,8 +97,14 @@ private:
 	int ParticleCount() const;
 	void Simulate( float deltaTime, GLuint targets, GLuint normals, GLuint morphTargets, GLuint morphNormals, float morphAmount );
 	void Render( GLuint normals );// normals: the current target's, for the beat effects
+	struct Camera
+	{
+		swarm::Mat4 view;// world to camera
+		float fovY     = 0.0f;
+		float distance = 0.0f;// from the centre of the shape
+	};
 	float ViewportAspect() const;
-	swarm::Mat4 ViewMatrix() const;// world to camera
+	Camera CurrentCamera() const;
 
 	Slot slots[ kNumSlots ];
 	GLuint fallbackTexture   = 0;
@@ -141,6 +147,9 @@ private:
 	float rotateX        = 0.5f;
 	float rotateY        = 0.5f;
 	float zoom           = 0.5f;
+	int cameraPath       = 0;// 0 = off
+	float pathPosition   = 0.0f;
+	float pathSpeed      = 0.0f;
 	float windX          = 0.5f;
 	float windY          = 0.5f;
 	float windZ          = 0.5f;
@@ -177,6 +186,7 @@ private:
 	float noiseTime  = 0.0f;// advances with Flow Speed
 	float buzzTime   = 0.0f;// advances with Buzz Speed
 	float spinAngle  = 0.0f;
+	float pathTravel = 0.0f;// added to Path Position by Path Speed
 
 	// Beat clock and the current beat's envelope.
 	bool hitPressed        = false;
