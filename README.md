@@ -17,6 +17,7 @@ HD and beyond.
 - Wind, gusts, vortex and explode forces that bend the shape and let it spring back
 - Blow particles off the shape and across the screen, wrapping around the edges
 - Swirl, shimmer, scatter and a free-spinning camera
+- Beat effects locked to Resolume's BPM: pulse, shockwave, burst, jitter, flash, spin steps and auto-advance
 - Two-colour gradients by speed, height or depth, random sparks, twinkle and depth fog
 - Meshes load in the background, so loading a new file mid-show doesn't drop frames
 
@@ -77,6 +78,11 @@ for the command).
   **Morph To** to the second, and map **Morph** to a MIDI fader or your
   crossfader. The swarm follows the fader with all its swirl and buzz; stop
   halfway for a cloud that's neither one nor the other.
+- **On the beat:** the **Beat** effects follow Resolume's BPM by themselves.
+  Leave **Beat Rate** on 1 Beat, raise **Pulse** or **Shockwave** a little,
+  and the shape breathes with the music. Add **Auto Next** on 4 bars and the
+  swarm changes models on the phrase. Set Beat Rate to Off and map **Hit**
+  to a pad or an audio trigger to play them by hand.
 - **Hit the kick:** map **Scatter** to a pad or an audio-reactive trigger for
   a burst that settles back into the shape.
 - **Fireflies:** turn **Surface Flow** down, **Buzz** and **Twinkle** up and
@@ -144,6 +150,16 @@ The parameters appear in Resolume in this order:
 |           | Wrap Edges        | Blown-away particles that leave the picture come back on the other side |
 |           | Vortex            | Twist around the vertical axis, either direction |
 |           | Explode           | Push outward from the centre; below centre pulls inward |
+| Beat      | Beat Rate         | Fire the beat effects on Resolume's tempo: every ½ beat, 1 or 2 beats, 1 or 2 bars, or Off |
+|           | Hit               | Fire them by hand (MIDI pad, audio trigger) |
+|           | Decay             | How long each hit lasts, from a snap to a soft fade |
+|           | Pulse             | The shape swells along its surface |
+|           | Shockwave         | A ring runs out from the centre through the shape |
+|           | Burst             | A share of the particles (up to 50 %, different ones each time) flies off and returns |
+|           | Jitter            | Every particle twitches to its own side |
+|           | Flash             | Brightness spike |
+|           | Spin Step         | The camera turns a step (up to 90°) and springs into place |
+|           | Auto Next         | Move to the next loaded model every 1, 2, 4 or 8 bars, on the downbeat |
 | Animation | Anim Speed        | Playback speed of animations, 0–3× (1× = the file's own frame rate; 24 fps for OBJ sequences) |
 |           | Ping Pong         | Play forwards and backwards instead of looping |
 |           | Restart On Switch | Start the sequence from its first frame when it becomes the target |

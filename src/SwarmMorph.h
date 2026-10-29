@@ -90,12 +90,13 @@ private:
 	void ReleaseSlotGL( Slot& slot );
 	void SelectNextLoadedSlot();
 	void CurrentTarget( GLuint& targets, GLuint& normals );
+	void UpdateBeat( float deltaTime );
 	float MorphTarget( GLuint& targets, GLuint& normals );// returns the morph amount, 0 if unused
 	void AdvanceAnimation( int slotIndex, float deltaTime );
 	double FramePosition( const Slot& slot ) const;
 	int ParticleCount() const;
 	void Simulate( float deltaTime, GLuint targets, GLuint normals, GLuint morphTargets, GLuint morphNormals, float morphAmount );
-	void Render();
+	void Render( GLuint normals );// normals: the current target's, for the beat effects
 	float ViewportAspect() const;
 	swarm::Mat4 ViewMatrix() const;// world to camera
 
@@ -157,6 +158,15 @@ private:
 	float flowSpeed      = 0.25f;
 	float buzzAmount     = 0.3f;
 	float buzzSpeed      = 0.3f;
+	int beatRate         = 2;// 1 beat
+	float decay          = 0.4f;
+	float pulse          = 0.0f;
+	float shockwave      = 0.0f;
+	float burst          = 0.0f;
+	float jitter         = 0.0f;
+	float flash          = 0.0f;
+	float spinStep       = 0.0f;
+	int autoNext         = 0;
 	bool normalizeMeshes = true;
 	bool nextPressed     = false;
 	bool scatterPressed  = false;
@@ -167,4 +177,19 @@ private:
 	float noiseTime  = 0.0f;// advances with Flow Speed
 	float buzzTime   = 0.0f;// advances with Buzz Speed
 	float spinAngle  = 0.0f;
+
+	// Beat clock and the current beat's envelope.
+	bool hitPressed        = false;
+	bool hitPending        = false;
+	float lastBarPhase     = -1.0f;
+	long long barCount     = 0;
+	double lastBarPosition = 0.0;
+	bool beatKick          = false;// true only on the frame of a beat
+	float beatAge          = 1e3f; // seconds since the last beat
+	float beatEnvelope     = 0.0f; // 1 on the beat, decaying with Decay
+	float waveDuration     = 0.5f; // seconds the shockwave takes to cross the shape
+	float beatSeed         = 0.0f;
+	float stepAngle        = 0.0f; // Spin Step camera angle and its spring
+	float stepTarget       = 0.0f;
+	float stepVelocity     = 0.0f;
 };
