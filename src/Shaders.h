@@ -47,9 +47,7 @@ uniform float uAttraction;
 uniform float uDampingRatio;
 uniform float uChaos;
 uniform float uTurbulence;
-uniform float uShimmer;
 uniform float uNoiseScale;
-uniform float uScatter;
 uniform vec3 uWind;
 uniform float uGusts;
 uniform float uVortex;
@@ -240,7 +238,7 @@ void main()
 	vec3 field = curlNoise( position * uNoiseScale, uNoiseTime, potential );
 
 	// In flight: full 3D swirl, relative to the remaining distance.
-	vec3 swirl = field * ( uShimmer + uTurbulence * min( distance, 1.5 ) );
+	vec3 swirl = field * ( uTurbulence * min( distance, 1.5 ) );
 	// Near the surface: stream along it, and hover in a loose layer around it.
 	float nearSurface = 1.0 - smoothstep( 0.5, 1.5, distance );
 	vec3 alongSurface = field - normal * dot( field, normal );
@@ -273,11 +271,6 @@ void main()
 		acceleration += ( air - velocity ) * ( 1.5 * response * ( 1.0 - hold ) );
 	}
 
-	if( uScatter > 0.0 )
-	{
-		vec3 direction = vec3( hash( seed * 12.9 + uTime ), hash( seed * 78.2 + uTime ), hash( seed * 37.7 + uTime ) ) * 2.0 - 1.0;
-		velocity += normalize( direction + 1e-4 ) * uScatter * ( 0.3 + hash( seed * 5.3 ) );
-	}
 
 	velocity += acceleration * uDeltaTime;
 	velocity *= exp( -damping * hold * uDeltaTime );
@@ -356,6 +349,7 @@ uniform sampler2D uNormals;// surface normal of each particle's spot; zero for p
 uniform int uTextureWidth;
 uniform mat4 uMVP;
 uniform float uPointSize;// in pixels at the reference distance
+uniform float uRefDistance;
 uniform vec3 uColor;
 uniform vec3 uColor2;
 uniform int uColorMode;  // 0 speed, 1 height, 2 depth, 3 random
@@ -420,9 +414,12 @@ void main()
 	vec4 clip = uMVP * vec4( position, 1.0 );
 	gl_Position = clip;
 
+	// Points grow more slowly than true perspective as the camera comes
+	// closer, so close-ups show finer grain instead of a mush of big blobs.
 	// Capped, so a camera flying through the swarm isn't blinded by points
 	// right in front of the lens.
-	float size = uPointSize / max( clip.w, 0.05 );
+	float closeness = uRefDistance / max( clip.w, 0.05 );
+	float size = uPointSize * pow( closeness, 0.6 );
 	gl_PointSize = clamp( size, 1.0, 48.0 );
 
 	// 0 at the front of the shape, 1 at the back.
@@ -446,11 +443,15 @@ void main()
 	}
 	vec3 color = mix( uColor, uColor2, weight );
 
-	// Fast particles glow towards white.
-	color = mix( color, vec3( 1.0 ), clamp( speed * 0.3, 0.0, 1.0 ) * uHeat );
-
 	// Points smaller than a pixel are drawn at one pixel but dimmer, which avoids flicker.
-	float intensity = uBrightness * clamp( size * size, 0.0, 1.0 ) * smoothstep( 0.05, 0.4, clip.w );
+	// The smaller close-up points get some of their light back, so zooming in
+	// doesn't dim the shape.
+	float intensity = uBrightness * clamp( size * size, 0.0, 1.0 ) * smoothstep( 0.05, 0.4, clip.w ) * min( pow( closeness, 0.5 ), 3.0 );
+
+	// Speed Glow: moving particles light up and burn towards white.
+	float glow = smoothstep( 0.15, 1.2, speed ) * uHeat;
+	color = mix( color, vec3( 1.0 ), glow * 0.85 );
+	intensity *= 1.0 + 2.5 * glow;
 
 	// Twinkle: each particle flares now and then at its own rate.
 	if( uTwinkle > 0.0 )
@@ -472,14 +473,16 @@ static const char kRenderFS[] = R"(#version 410 core
 in vec4 vColor;
 out vec4 fragColor;
 
+uniform float uSoftness;// falloff exponent: below 1 a crisp dot, above 2 a soft glow
+
 void main()
 {
 	vec2 c = gl_PointCoord * 2.0 - 1.0;
 	float r2 = dot( c, c );
 	if( r2 > 1.0 )
 		discard;
-	float falloff = 1.0 - r2;
-	float alpha = vColor.a * falloff * falloff;
+	// Scaled so every softness gives a point the same total light.
+	float alpha = vColor.a * pow( 1.0 - r2, uSoftness ) * ( uSoftness + 1.0 ) / 3.0;
 	fragColor = vec4( vColor.rgb * alpha, alpha );
 }
 )";

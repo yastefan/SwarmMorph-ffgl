@@ -128,17 +128,19 @@ private:
 	float damping        = 0.4f;
 	float chaos          = 0.5f;
 	float turbulence     = 0.5f;
-	float shimmer        = 0.3f;
 	float noiseScale     = 0.3f;
 	float pointSize      = 0.12f;
-	float colorR         = 0.55f;
-	float colorG         = 0.8f;
-	float colorB         = 1.0f;
-	float heat           = 0.5f;
+	float colorH         = 0.574f;// light blue
+	float colorS         = 0.45f;
+	float colorV         = 1.0f;
+	float colorA         = 1.0f;
+	float color2A        = 1.0f;
+	float softness       = 0.45f;// matches the earlier fixed falloff
+	float heat           = 0.4f;
 	float brightness     = 0.2f;
-	float color2R        = 1.0f;
-	float color2G        = 0.45f;
-	float color2B        = 0.15f;
+	float color2H        = 0.059f;// orange
+	float color2S        = 0.85f;
+	float color2V        = 1.0f;
 	int colorMode        = 0;// 0 speed, 1 height, 2 depth, 3 random
 	float colorMix       = 0.0f;
 	float twinkle        = 0.0f;
@@ -178,8 +180,6 @@ private:
 	int autoNext         = 0;
 	bool normalizeMeshes = true;
 	bool nextPressed     = false;
-	bool scatterPressed  = false;
-	float scatterPending = 0.0f;
 
 	double lastTime  = -1.0;
 	float simTime    = 0.0f;
