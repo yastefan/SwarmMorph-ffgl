@@ -53,9 +53,17 @@ SurfaceBinding BindSurface( const Mesh& mesh, size_t count, uint32_t seed );
 // Positions (xyz per particle) of a binding on one set of vertex positions.
 std::vector< float > EvaluateBinding( const SurfaceBinding& binding, const std::vector< float >& positions );
 
-// Unit face normals (xyz per particle) of the bound triangles; zero for
+// Unit vertex normals (xyz per vertex): the area-weighted average of the
+// normals of the triangles around each vertex.
+std::vector< float > ComputeVertexNormals( const std::vector< uint32_t >& triangles, const std::vector< float >& positions );
+
+// Unit surface normals (xyz per particle), smoothly blended from the vertex
+// normals of the bound triangle, so lighting doesn't show the mesh's facets.
+// At a sharp edge (a vertex normal more than about 45 degrees off the face)
+// that corner keeps the face normal, so a cube stays a cube. Zero for
 // particles bound to a single vertex of a point cloud.
-std::vector< float > EvaluateNormals( const SurfaceBinding& binding, const std::vector< float >& positions );
+std::vector< float > EvaluateNormals( const SurfaceBinding& binding, const std::vector< float >& positions,
+									  const std::vector< float >& vertexNormals );
 
 // Translation and scale that centre the given frames on their combined
 // bounding box and fit them inside the unit sphere.

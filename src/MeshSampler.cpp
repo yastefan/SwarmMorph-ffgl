@@ -289,8 +289,36 @@ std::vector< float > EvaluateBinding( const SurfaceBinding& binding, const std::
 	return points;
 }
 
-std::vector< float > EvaluateNormals( const SurfaceBinding& binding, const std::vector< float >& positions )
+std::vector< float > ComputeVertexNormals( const std::vector< uint32_t >& triangles, const std::vector< float >& positions )
 {
+	std::vector< float > normals( positions.size(), 0.0f );
+	for( size_t t = 0; t + 2 < triangles.size(); t += 3 )
+	{
+		const float* a = &positions[ 3 * triangles[ t ] ];
+		const float* b = &positions[ 3 * triangles[ t + 1 ] ];
+		const float* c = &positions[ 3 * triangles[ t + 2 ] ];
+		float ab[ 3 ] = { b[ 0 ] - a[ 0 ], b[ 1 ] - a[ 1 ], b[ 2 ] - a[ 2 ] };
+		float ac[ 3 ] = { c[ 0 ] - a[ 0 ], c[ 1 ] - a[ 1 ], c[ 2 ] - a[ 2 ] };
+		// Unnormalised: its length is twice the area, which weights the average.
+		float n[ 3 ] = { ab[ 1 ] * ac[ 2 ] - ab[ 2 ] * ac[ 1 ], ab[ 2 ] * ac[ 0 ] - ab[ 0 ] * ac[ 2 ], ab[ 0 ] * ac[ 1 ] - ab[ 1 ] * ac[ 0 ] };
+		for( int corner = 0; corner < 3; ++corner )
+			for( int axis = 0; axis < 3; ++axis )
+				normals[ 3 * triangles[ t + corner ] + axis ] += n[ axis ];
+	}
+	for( size_t v = 0; v + 2 < normals.size(); v += 3 )
+	{
+		float length = std::sqrt( normals[ v ] * normals[ v ] + normals[ v + 1 ] * normals[ v + 1 ] + normals[ v + 2 ] * normals[ v + 2 ] );
+		if( length > 1e-12f )
+			for( int axis = 0; axis < 3; ++axis )
+				normals[ v + axis ] /= length;
+	}
+	return normals;
+}
+
+std::vector< float > EvaluateNormals( const SurfaceBinding& binding, const std::vector< float >& positions,
+									  const std::vector< float >& vertexNormals )
+{
+	const float kCrease = 0.7f;// cos 45 deg
 	size_t count = binding.indices.size() / 4;
 	std::vector< float > normals( count * 3, 0.0f );
 	for( size_t i = 0; i < count; ++i )
@@ -305,7 +333,20 @@ std::vector< float > EvaluateNormals( const SurfaceBinding& binding, const std::
 		if( length < 1e-12f )
 			continue;// point cloud or degenerate triangle
 		for( int axis = 0; axis < 3; ++axis )
-			normals[ 3 * i + axis ] = n[ axis ] / length;
+			n[ axis ] /= length;
+
+		float smooth[ 3 ] = { 0.0f, 0.0f, 0.0f };
+		for( int corner = 0; corner < 3; ++corner )
+		{
+			const float* vn = &vertexNormals[ 3 * binding.indices[ 4 * i + corner ] ];
+			bool soft       = vn[ 0 ] * n[ 0 ] + vn[ 1 ] * n[ 1 ] + vn[ 2 ] * n[ 2 ] > kCrease;
+			float weight    = binding.weights[ 4 * i + corner ];
+			for( int axis = 0; axis < 3; ++axis )
+				smooth[ axis ] += weight * ( soft ? vn[ axis ] : n[ axis ] );
+		}
+		float smoothLength = std::sqrt( smooth[ 0 ] * smooth[ 0 ] + smooth[ 1 ] * smooth[ 1 ] + smooth[ 2 ] * smooth[ 2 ] );
+		for( int axis = 0; axis < 3; ++axis )
+			normals[ 3 * i + axis ] = smoothLength > 1e-6f ? smooth[ axis ] / smoothLength : n[ axis ];
 	}
 	return normals;
 }

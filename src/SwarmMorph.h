@@ -42,6 +42,7 @@ private:
 		std::vector< float > normals;             // static mesh: surface normal per particle
 		swarm::SurfaceBinding binding;            // animated mesh: where each particle sits
 		std::vector< std::vector< float > > frames;// animated mesh: vertex positions per frame
+		std::vector< uint32_t > triangles;         // animated mesh: for the vertex normals
 		float fps = 24.0f;                         // animated mesh: playback rate at 1x
 		std::string error;
 		std::string warning;
@@ -61,7 +62,9 @@ private:
 		// Animation (empty for static meshes).
 		std::vector< std::vector< float > > frames;
 		std::vector< float > blended;// current frame, padded to whole texture rows
+		std::vector< uint32_t > triangles;
 		GLuint vertexTexture = 0;
+		GLuint vertexNormalTexture = 0;// smooth normals of the current frame, same layout
 		GLuint bindIndices   = 0;
 		GLuint bindWeights   = 0;
 		GLuint fbo           = 0;
@@ -96,7 +99,12 @@ private:
 	double FramePosition( const Slot& slot ) const;
 	int ParticleCount() const;
 	void Simulate( float deltaTime, GLuint targets, GLuint normals, GLuint morphTargets, GLuint morphNormals, float morphAmount );
-	void Render( GLuint normals );// normals: the current target's, for the beat effects
+	// targets/normals: the shape the swarm is closest to, for the beat effects
+	// and the light; other*: the shape it is coming from or blending with, so
+	// the light doesn't drop out when the target changes.
+	void Render( GLuint targets, GLuint normals, GLuint otherTargets, GLuint otherNormals );
+	void SlotTextures( int slot, GLuint& targets, GLuint& normals ) const;
+	void SetLightUniforms( ffglex::FFGLShader& shader, const swarm::Mat4& view ) const;
 	struct Camera
 	{
 		swarm::Mat4 view;// world to camera
@@ -110,12 +118,15 @@ private:
 	GLuint fallbackTexture   = 0;
 	int activeSlot           = -1;// slot the swarm is heading to; -1 = fallback sphere
 	int morphActiveSlot      = -1;// slot Morph blends towards; -1 = none
+	int leftSlot             = -2;// slot the swarm last left, for the light; -1 = sphere, -2 = none
 	StateBuffer state[ 2 ];// ping-ponged
 	int front                = 0;// index of the state holding the latest frame
 	GLuint emptyVAO          = 0;// core profile needs a bound VAO even without attributes
 	GLuint indexVBO          = 0;// particle index per vertex, for the render pass
 	GLuint indexVAO          = 0;
 	GLuint streakVAO         = 0;// the same indices, one per instance, for streaks
+	swarm::Mat4 previousMVP;   // last frame's camera, for streaks
+	bool hasPreviousMVP      = false;
 	ffglex::FFGLShader updateShader;
 	ffglex::FFGLShader skinShader;
 	ffglex::FFGLShader renderShader;
@@ -148,6 +159,18 @@ private:
 	int colorMode        = 0;// 0 speed, 1 height, 2 depth, 3 random
 	float colorMix       = 0.0f;
 	float twinkle        = 0.0f;
+	float lightH         = 0.0f;// white
+	float lightS         = 0.0f;
+	float lightV         = 1.0f;
+	float lightA         = 1.0f;
+	float selfGlow       = 1.0f;// full own colour, as before
+	float keyLight       = 0.0f;
+	float lightAngle     = 0.333f;// -60 deg: from the left, a little in front
+	float lightHeight    = 0.667f;// 30 deg above
+	float rim            = 0.0f;
+	float pointLight     = 0.0f;
+	float lightOrbit     = 0.5f;// still
+	float centerLight    = 0.0f;
 	float depthFade      = 0.0f;
 	float spin           = 0.55f;
 	float rotateX        = 0.5f;
@@ -191,6 +214,7 @@ private:
 	float noiseTime  = 0.0f;// advances with Flow Speed
 	float buzzTime   = 0.0f;// advances with Buzz Speed
 	float spinAngle  = 0.0f;
+	float orbitAngle = 0.0f;// Light Orbit
 	float pathTravel = 0.0f;// added to Path Position by Path Speed
 
 	// Beat clock and the current beat's envelope.
