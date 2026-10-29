@@ -307,6 +307,7 @@ void main()
 // and weights) against the current frame's vertex positions.
 static const char kSkinFS[] = R"(#version 410 core
 uniform sampler2D uVertices;    // xyz per vertex, uVertexTextureWidth per row
+uniform sampler2D uVertexNormals;// smooth normal per vertex, same layout
 uniform usampler2D uBindIndices;// xyz = vertex indices
 uniform sampler2D uBindWeights; // xyz = barycentric weights
 uniform int uVertexTextureWidth;
@@ -320,6 +321,19 @@ vec3 vertexAt( uint index )
 	return texelFetch( uVertices, ivec2( i % uVertexTextureWidth, i / uVertexTextureWidth ), 0 ).xyz;
 }
 
+vec3 vertexNormalAt( uint index )
+{
+	int i = int( index );
+	return texelFetch( uVertexNormals, ivec2( i % uVertexTextureWidth, i / uVertexTextureWidth ), 0 ).xyz;
+}
+
+// A corner's vertex normal, or the face normal at a sharp edge (as on the CPU).
+vec3 cornerNormal( uint index, vec3 face )
+{
+	vec3 vn = vertexNormalAt( index );
+	return dot( vn, face ) > 0.7 ? vn : face;
+}
+
 void main()
 {
 	ivec2 texel = ivec2( gl_FragCoord.xy );
@@ -330,10 +344,19 @@ void main()
 	vec3 c = vertexAt( indices.z );
 	oTarget = vec4( a * weights.x + b * weights.y + c * weights.z, 1.0 );
 
-	// Face normal of the bound triangle; zero for point clouds (all three indices equal).
+	// Smooth normal, blended from the corners; zero for point clouds (all
+	// three indices equal).
 	vec3 n = cross( b - a, c - a );
 	float lengthSq = dot( n, n );
-	oNormal = vec4( lengthSq > 1e-24 ? n * inversesqrt( lengthSq ) : vec3( 0.0 ), 0.0 );
+	if( lengthSq > 1e-24 )
+	{
+		vec3 face = n * inversesqrt( lengthSq );
+		vec3 blended = cornerNormal( indices.x, face ) * weights.x + cornerNormal( indices.y, face ) * weights.y +
+					   cornerNormal( indices.z, face ) * weights.z;
+		oNormal = vec4( dot( blended, blended ) > 1e-12 ? normalize( blended ) : face, 0.0 );
+	}
+	else
+		oNormal = vec4( 0.0 );
 }
 )";
 
@@ -367,6 +390,19 @@ uniform float uBrightness;
 uniform float uTwinkle;
 uniform float uDepthFade;
 uniform float uDistance; // camera distance to the centre of the shape
+// Light, in the shape's own space.
+uniform sampler2D uTargets;// where each particle belongs, to tell surface from free flight
+uniform sampler2D uOtherTargets;// the shape it is coming from or blending with
+uniform sampler2D uOtherNormals;
+uniform vec3 uLightColor;
+uniform float uSelfGlow;// the particles' own light, in their colour
+uniform float uKeyLight;
+uniform vec3 uLightDirection;// towards the key light
+uniform float uRim;
+uniform vec3 uEyePosition;
+uniform float uPointLight;
+uniform vec3 uPointLightPosition;
+uniform float uCenterLight;
 uniform float uTime;
 // Beat effects, drawn as an offset from the simulated position so they land
 // exactly on the beat and fade with Decay, without waiting for the spring.
@@ -380,6 +416,7 @@ uniform float uJitter;
 #ifdef STREAKS
 uniform sampler2D uPreviousPositions;// the state a frame ago
 uniform float uStreakLength;         // 1 = back to where the particle was a frame ago
+uniform mat4 uPreviousMVP;           // the camera a frame ago, so Spin and camera moves draw streaks too
 uniform vec2 uViewport;              // in pixels
 noperspective out vec2 vLocal;       // pixels: along the streak from its tail, and across it
 flat out float vLength;
@@ -459,12 +496,19 @@ void main()
 	if( distance( previous, state.xyz ) > 1.5 )
 		previous = state.xyz;
 	float unused;
-	vec3 tail = mix( position, BeatOffset( previous, texel, seed, unused ), uStreakLength );
-	vec4 tailClip = uMVP * vec4( tail, 1.0 );
+	// The tail is where the particle was on screen a frame ago, seen by last
+	// frame's camera: the streak follows the movement in the picture, whether
+	// the particle moved or the shape turned under it.
+	vec4 previousClip = uPreviousMVP * vec4( BeatOffset( previous, texel, seed, unused ), 1.0 );
+	vec4 tailClip = mix( clip, previousClip, uStreakLength );
 	if( tailClip.w < 0.05 )// behind the camera: no streak
 		tailClip = clip;
 
 	vec2 head = ToPixels( clip ), start = ToPixels( tailClip );
+	// A jump on screen (Path Position moved, Rotate snapped) is not a
+	// movement either.
+	if( distance( head, start ) > 0.35 * max( uViewport.x, uViewport.y ) )
+		start = head;
 	vec2 axis = head - start;
 	float streak = length( axis );
 	vec2 direction = streak > 1e-3 ? axis / streak : vec2( 1.0, 0.0 );
@@ -507,19 +551,74 @@ void main()
 	}
 	vec3 color = mix( uColor, uColor2, weight );
 
+	// Light. Self Glow is how much each particle shines on its own; the
+	// lights add to that. Shading needs a surface, so key light and rim fade
+	// out for particles far from their spot (blown away, bursting, in
+	// mid-morph); point and centre light still reach those by distance. Lit
+	// parts take on the light colour; under white light they become a paler
+	// shade of the particle colour.
+	vec3 ownColor = color * uSelfGlow;
+	if( uKeyLight > 0.0 || uRim > 0.0 || uPointLight > 0.0 || uCenterLight > 0.0 )
+	{
+		// Near either shape counts as on the surface, with that shape's
+		// normal, so the light hands over smoothly when the target changes.
+		vec3 target = texelFetch( uTargets, texel, 0 ).xyz;
+		vec3 normal = texelFetch( uNormals, texel, 0 ).xyz;
+		vec3 otherTarget = texelFetch( uOtherTargets, texel, 0 ).xyz;
+		vec3 otherNormal = texelFetch( uOtherNormals, texel, 0 ).xyz;
+		if( dot( normal, normal ) == 0.0 )
+			normal = target / max( length( target ), 1e-4 );
+		if( dot( otherNormal, otherNormal ) == 0.0 )
+			otherNormal = otherTarget / max( length( otherTarget ), 1e-4 );
+		float atTarget = 1.0 - smoothstep( 0.3, 0.8, distance( state.xyz, target ) );
+		float atOther = 1.0 - smoothstep( 0.3, 0.8, distance( state.xyz, otherTarget ) );
+		vec3 blendedNormal = normal * ( atTarget + 1e-3 ) + otherNormal * atOther;
+		vec3 n = normalize( blendedNormal + vec3( 0.0, 1e-6, 0.0 ) );
+		float onSurface = max( atTarget, atOther );
+		vec3 tint = uLightColor * ( 0.35 + 0.65 * color );
+		vec3 lit = vec3( 0.0 );
+
+		// Key light: a little wrap-around, then the side turned away drops
+		// almost to black, for a hard light-to-shadow edge.
+		float key = uKeyLight * onSurface;
+		float facing = clamp( ( dot( n, uLightDirection ) + 0.2 ) / 1.2, 0.0, 1.0 );
+		lit += tint * ( 2.5 * facing * facing * key );
+
+		// Rim: the outline, where the surface turns away from the camera.
+		float edge = 1.0 - abs( dot( n, normalize( uEyePosition - position ) ) );
+		lit += tint * ( 3.0 * uRim * onSurface * edge * edge * edge );
+
+		// Point light: a pool of light that fades within about a shape's
+		// radius, and only lights surfaces facing it.
+		vec3 toLight = uPointLightPosition - position;
+		float near = exp( -2.5 * dot( toLight, toLight ) );
+		float towards = clamp( ( dot( n, normalize( toLight ) ) + 0.2 ) / 1.2, 0.0, 1.0 );
+		lit += tint * ( 8.0 * uPointLight * near * mix( 1.0, towards * towards, onSurface ) );
+
+		// Centre light: a lamp inside the shape, as if in fog. It lights
+		// particles by their distance from the centre, whichever way they face.
+		lit += tint * ( 6.0 * uCenterLight * exp( -3.5 * dot( position, position ) ) );
+
+		ownColor += lit;
+	}
+	color = ownColor;
+
 	// Points smaller than a pixel are drawn at one pixel but dimmer, which avoids flicker.
 	// The smaller close-up points get some of their light back, so zooming in
 	// doesn't dim the shape.
 	float intensity = uBrightness * clamp( size * size, 0.0, 1.0 ) * smoothstep( 0.05, 0.4, clip.w ) * min( pow( closeness, 0.5 ), 3.0 );
 #ifdef STREAKS
-	// A long streak spreads its light a little, so fast particles don't turn
-	// into glaring lines.
-	intensity *= pow( 1.0 + streak / ( 2.0 * radius ), -0.35 );
+	// A streak spreads the particle's light along its length, like motion
+	// blur, but keeps a little extra so trails stay visible: a long streak
+	// gives off somewhat more light than a round point, not many times more,
+	// which would flood the picture with glaring lines.
+	intensity /= pow( 1.0 + 2.0 * streak / ( 3.14159 * radius ), 0.75 );
 #endif
 
-	// Speed Glow: moving particles light up and burn towards white.
+	// Speed Glow: moving particles light up and burn towards white. It is
+	// part of their own light, so it dims with Self Glow.
 	float glow = smoothstep( 0.15, 1.2, speed ) * uHeat;
-	color = mix( color, vec3( 1.0 ), glow * 0.85 );
+	color = mix( color, vec3( uSelfGlow ), glow * 0.85 );
 	intensity *= 1.0 + 2.5 * glow;
 
 	// Twinkle: each particle flares now and then at its own rate.
@@ -532,6 +631,14 @@ void main()
 	intensity *= 1.0 + waveGlow * min( uShockwave * 5.0, 1.5 );
 	// Depth Fade: the back of the shape sinks into darkness, like fog.
 	intensity *= 1.0 - uDepthFade * 0.9 * depth;
+
+	// A single particle can't shine brighter than white: above 0.7 its light
+	// eases off towards 1, keeping the colour. Stacked lights would otherwise
+	// clip the soft falloff into hard flat blobs and shift the hue. Dense
+	// areas still add up to white, as before.
+	float peak = max( max( color.r, color.g ), color.b ) * intensity;
+	if( peak > 0.7 )
+		intensity *= ( 0.7 + 0.3 * ( 1.0 - exp( ( 0.7 - peak ) / 0.3 ) ) ) / peak;
 
 	vColor = vec4( color, intensity );
 }

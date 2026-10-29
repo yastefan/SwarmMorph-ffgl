@@ -101,6 +101,19 @@ enum ParamID
 	PID_TWINKLE,
 	PID_DEPTH_FADE,
 
+	PID_LIGHT_H,
+	PID_LIGHT_S,
+	PID_LIGHT_V,
+	PID_LIGHT_A,
+	PID_SELF_GLOW,
+	PID_KEY_LIGHT,
+	PID_LIGHT_ANGLE,
+	PID_LIGHT_HEIGHT,
+	PID_RIM,
+	PID_POINT_LIGHT,
+	PID_LIGHT_ORBIT,
+	PID_CENTER_LIGHT,
+
 	PID_SPIN,
 	PID_ROTATE_X,
 	PID_ROTATE_Y,
@@ -176,6 +189,7 @@ float PointSizeValue( float v ) { return 0.5f + 12.0f * v; }
 float BrightnessValue( float v ) { return 2.0f * v; }
 float SpinValue( float v ) { return ( v - 0.5f ); }// revolutions per second
 float AngleValue( float v ) { return ( v - 0.5f ) * 360.0f; }
+float HeightValue( float v ) { return ( v - 0.5f ) * 180.0f; }// degrees above the horizon
 float DistanceValue( float v ) { return 6.0f - 4.5f * v; }
 
 // Centred sliders: 0.5 is no force. The small dead zone makes it easy to hit
@@ -192,6 +206,7 @@ float CentredForce( float v, float maxForce )
 float WindValue( float v ) { return CentredForce( v, 10.0f ); }
 float VortexValue( float v ) { return CentredForce( v, 6.0f ); }
 float RadialValue( float v ) { return CentredForce( v, 6.0f ); }
+float OrbitValue( float v ) { return CentredForce( v, 0.5f ); }// revolutions per second
 // Beat Rate and Auto Next options, as intervals in bars (4/4).
 const double kBeatIntervals[]  = { 0.0, 0.125, 0.25, 0.5, 1.0, 2.0 };
 const double kAutoNextBars[]   = { 0.0, 1.0, 2.0, 4.0, 8.0 };
@@ -350,6 +365,25 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_DEPTH_FADE, "Depth Fade", FF_TYPE_STANDARD );
 	for( unsigned int id = PID_PARTICLES; id <= PID_DEPTH_FADE; ++id )
 		SetParamGroup( id, "Look" );
+
+	// Self Glow is the particles' own light in their colour. The other lights
+	// fall on the shape's surface: a key light from a fixed direction relative
+	// to the screen, a rim along the outline, a point light that circles the
+	// shape and a light at its centre.
+	SetParamInfof( PID_LIGHT_H, "Light Color", FF_TYPE_HUE );
+	SetParamInfof( PID_LIGHT_S, "Light Color_Sat", FF_TYPE_SATURATION );
+	SetParamInfof( PID_LIGHT_V, "Light Color_Bri", FF_TYPE_BRIGHTNESS );
+	SetParamInfof( PID_LIGHT_A, "Light Color_Alpha", FF_TYPE_ALPHA );
+	SetParamInfof( PID_SELF_GLOW, "Self Glow", FF_TYPE_STANDARD );
+	SetParamInfof( PID_KEY_LIGHT, "Key Light", FF_TYPE_STANDARD );
+	SetParamInfof( PID_LIGHT_ANGLE, "Light Angle", FF_TYPE_STANDARD );
+	SetParamInfof( PID_LIGHT_HEIGHT, "Light Height", FF_TYPE_STANDARD );
+	SetParamInfof( PID_RIM, "Rim", FF_TYPE_STANDARD );
+	SetParamInfof( PID_POINT_LIGHT, "Point Light", FF_TYPE_STANDARD );
+	SetParamInfof( PID_LIGHT_ORBIT, "Light Orbit", FF_TYPE_STANDARD );
+	SetParamInfof( PID_CENTER_LIGHT, "Center Light", FF_TYPE_STANDARD );
+	for( unsigned int id = PID_LIGHT_H; id <= PID_CENTER_LIGHT; ++id )
+		SetParamGroup( id, "Light" );
 
 	SetParamInfof( PID_SPIN, "Spin", FF_TYPE_STANDARD );
 	SetParamInfof( PID_ROTATE_X, "Rotate X", FF_TYPE_STANDARD );
@@ -525,9 +559,10 @@ void SwarmMorph::ReleaseSlotGL( Slot& slot )
 	glDeleteTextures( 1, &slot.texture );
 	glDeleteTextures( 1, &slot.normals );
 	glDeleteTextures( 1, &slot.vertexTexture );
+	glDeleteTextures( 1, &slot.vertexNormalTexture );
 	glDeleteTextures( 1, &slot.bindIndices );
 	glDeleteTextures( 1, &slot.bindWeights );
-	slot.fbo = slot.texture = slot.normals = slot.vertexTexture = slot.bindIndices = slot.bindWeights = 0;
+	slot.fbo = slot.texture = slot.normals = slot.vertexTexture = slot.vertexNormalTexture = slot.bindIndices = slot.bindWeights = 0;
 }
 
 void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
@@ -575,13 +610,15 @@ void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
 				swarm::SurfaceBinding binding = swarm::BindSurface( sequence.firstFrame, kMaxParticles, seed );
 				if( sequence.frames.size() > 1 )
 				{
-					job->binding = std::move( binding );
-					job->frames  = std::move( sequence.frames );
+					job->binding   = std::move( binding );
+					job->frames    = std::move( sequence.frames );
+					job->triangles = std::move( sequence.firstFrame.triangles );
 				}
 				else
 				{
 					job->points  = swarm::EvaluateBinding( binding, sequence.frames[ 0 ] );
-					job->normals = swarm::EvaluateNormals( binding, sequence.frames[ 0 ] );
+					std::vector< float > vertexNormals = swarm::ComputeVertexNormals( sequence.firstFrame.triangles, sequence.frames[ 0 ] );
+					job->normals = swarm::EvaluateNormals( binding, sequence.frames[ 0 ], vertexNormals );
 				}
 			}
 		}
@@ -635,10 +672,12 @@ void SwarmMorph::UploadFinishedLoads()
 void SwarmMorph::UploadAnimation( Slot& slot, LoadJob& job )
 {
 	slot.frames      = std::move( job.frames );
+	slot.triangles   = std::move( job.triangles );
 	size_t vertices  = slot.frames[ 0 ].size() / 3;
 	slot.vertexRows  = static_cast< int >( ( vertices + kVertexTextureWidth - 1 ) / kVertexTextureWidth );
 	slot.blended.assign( static_cast< size_t >( slot.vertexRows ) * kVertexTextureWidth * 3, 0.0f );
 	slot.vertexTexture = CreateTexture( GL_RGB32F, GL_RGB, GL_FLOAT, kVertexTextureWidth, slot.vertexRows, nullptr );
+	slot.vertexNormalTexture = CreateTexture( GL_RGB32F, GL_RGB, GL_FLOAT, kVertexTextureWidth, slot.vertexRows, nullptr );
 	slot.bindIndices   = CreateTexture( GL_RGBA32UI, GL_RGBA_INTEGER, GL_UNSIGNED_INT, kTextureWidth, kTextureWidth, job.binding.indices.data() );
 	slot.bindWeights   = CreateFloatTexture( GL_RGBA32F, GL_RGBA, job.binding.weights.data() );
 	slot.texture       = CreateFloatTexture( GL_RGBA32F, GL_RGBA, nullptr );
@@ -699,6 +738,12 @@ void SwarmMorph::AdvanceAnimation( int slotIndex, float deltaTime )
 		Scoped2DTextureBinding binding( slot.vertexTexture );
 		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kVertexTextureWidth, slot.vertexRows, GL_RGB, GL_FLOAT, slot.blended.data() );
 	}
+	// Smooth normals of the deformed surface, for the light.
+	{
+		std::vector< float > vertexNormals = swarm::ComputeVertexNormals( slot.triangles, slot.blended );
+		Scoped2DTextureBinding binding( slot.vertexNormalTexture );
+		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kVertexTextureWidth, slot.vertexRows, GL_RGB, GL_FLOAT, vertexNormals.data() );
+	}
 
 	// Skin pass: evaluate every particle's binding against the blended frame.
 	ScopedFBOBinding fboBinding( slot.fbo, ScopedFBOBinding::RB_REVERT );
@@ -707,8 +752,9 @@ void SwarmMorph::AdvanceAnimation( int slotIndex, float deltaTime )
 	skinShader.Set( "uVertices", 0 );
 	skinShader.Set( "uBindIndices", 1 );
 	skinShader.Set( "uBindWeights", 2 );
+	skinShader.Set( "uVertexNormals", 3 );
 	skinShader.Set( "uVertexTextureWidth", kVertexTextureWidth );
-	ScopedTextureUnits textures( { slot.vertexTexture, slot.bindIndices, slot.bindWeights } );
+	ScopedTextureUnits textures( { slot.vertexTexture, slot.bindIndices, slot.bindWeights, slot.vertexNormalTexture } );
 	ScopedVAOBinding vaoBinding( emptyVAO );
 	glDrawArrays( GL_TRIANGLES, 0, 3 );
 	glViewport( currentViewport.x, currentViewport.y, currentViewport.width, currentViewport.height );
@@ -740,11 +786,17 @@ void SwarmMorph::CurrentTarget( GLuint& targets, GLuint& normals )
 		activeSlot = -1;
 	if( activeSlot != previous && activeSlot >= 0 && restartOnSwitch )
 		slots[ activeSlot ].playhead = 0.0;
+	if( activeSlot != previous )
+		leftSlot = previous;
+	SlotTextures( activeSlot, targets, normals );
+}
 
-	if( activeSlot >= 0 )
+void SwarmMorph::SlotTextures( int slot, GLuint& targets, GLuint& normals ) const
+{
+	if( slot >= 0 && slots[ slot ].loaded )
 	{
-		targets = slots[ activeSlot ].texture;
-		normals = slots[ activeSlot ].normals;
+		targets = slots[ slot ].texture;
+		normals = slots[ slot ].normals;
 	}
 	else
 	{
@@ -759,6 +811,8 @@ float SwarmMorph::MorphTarget( GLuint& targets, GLuint& normals )
 	morphActiveSlot = morph > 0.0f && slots[ morphSlot ].loaded && morphSlot != activeSlot ? morphSlot : -1;
 	if( morphActiveSlot != previous && morphActiveSlot >= 0 && restartOnSwitch )
 		slots[ morphActiveSlot ].playhead = 0.0;
+	if( morphActiveSlot < 0 && previous >= 0 )
+		leftSlot = previous;
 	if( morphActiveSlot < 0 )
 		return 0.0f;
 	targets = slots[ morphActiveSlot ].texture;
@@ -842,6 +896,7 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	deltaTime = std::min( std::max( deltaTime, 0.0f ), 1.0f / 20.0f );
 	simTime += deltaTime;
 	spinAngle += SpinValue( spin ) * 2.0f * kPi * deltaTime;
+	orbitAngle += OrbitValue( lightOrbit ) * 2.0f * kPi * deltaTime;
 	pathTravel = std::fmod( pathTravel + deltaTime * PathSpeedValue( pathSpeed ), 1.0f );
 
 	UploadFinishedLoads();
@@ -859,7 +914,20 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	AdvanceAnimation( activeSlot, deltaTime );
 	AdvanceAnimation( morphActiveSlot, deltaTime );
 	Simulate( swarmDelta, targets, normals, morphTargets, morphNormals, morphAmount );
-	Render( morphAmount > 0.5f ? morphNormals : normals );
+	// The light looks at two shapes: the one in the lead and the other side
+	// of a morph, or else the shape the swarm just left.
+	GLuint otherTargets = targets, otherNormals = normals;
+	if( morphAmount > 0.0f )
+	{
+		otherTargets = morphTargets;
+		otherNormals = morphNormals;
+	}
+	else if( leftSlot >= -1 && leftSlot != activeSlot )
+		SlotTextures( leftSlot, otherTargets, otherNormals );
+	if( morphAmount > 0.5f )
+		Render( morphTargets, morphNormals, targets, normals );
+	else
+		Render( targets, normals, otherTargets, otherNormals );
 	return FF_SUCCESS;
 }
 
@@ -957,7 +1025,7 @@ SwarmMorph::Camera SwarmMorph::CurrentCamera() const
 	return camera;
 }
 
-void SwarmMorph::Render( GLuint normals )
+void SwarmMorph::Render( GLuint targets, GLuint normals, GLuint otherTargets, GLuint otherNormals )
 {
 	float height = static_cast< float >( std::max< GLuint >( currentViewport.height, 1 ) );
 
@@ -990,6 +1058,7 @@ void SwarmMorph::Render( GLuint normals )
 	shader.Set( "uColorMix", colorMix );
 	shader.Set( "uTwinkle", twinkle );
 	shader.Set( "uDepthFade", depthFade );
+	SetLightUniforms( shader, camera.view );
 	shader.Set( "uDistance", camera.distance );
 	shader.Set( "uTime", simTime );
 	shader.Set( "uBeat", beatEnvelope );
@@ -1001,6 +1070,9 @@ void SwarmMorph::Render( GLuint normals )
 	shader.Set( "uPositions", 0 );
 	shader.Set( "uVelocities", 1 );
 	shader.Set( "uNormals", 2 );
+	shader.Set( "uTargets", 3 );
+	shader.Set( "uOtherTargets", 4 );
+	shader.Set( "uOtherNormals", 5 );
 	shader.Set( "uTextureWidth", kTextureWidth );
 
 	glEnable( GL_BLEND );
@@ -1008,16 +1080,19 @@ void SwarmMorph::Render( GLuint normals )
 	if( streaks )
 	{
 		// The other state buffer still holds the previous frame.
-		shader.Set( "uPreviousPositions", 3 );
+		shader.Set( "uPreviousPositions", 6 );
 		shader.Set( "uStreakLength", StreakValue( streakLength ) );
+		const swarm::Mat4& previous = hasPreviousMVP ? previousMVP : mvp;
+		glUniformMatrix4fv( shader.FindUniform( "uPreviousMVP" ), 1, GL_FALSE, previous.m );
 		shader.Set( "uViewport", static_cast< float >( currentViewport.width ), static_cast< float >( currentViewport.height ) );
-		ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals, state[ 1 - front ].positions } );
+		ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals, targets, otherTargets, otherNormals,
+										 state[ 1 - front ].positions } );
 		ScopedVAOBinding vaoBinding( streakVAO );
 		glDrawArraysInstanced( GL_TRIANGLES, 0, 6, ParticleCount() );
 	}
 	else
 	{
-		ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals } );
+		ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals, targets, otherTargets, otherNormals } );
 		ScopedVAOBinding vaoBinding( indexVAO );
 		glEnable( GL_PROGRAM_POINT_SIZE );
 		glDrawArrays( GL_POINTS, 0, ParticleCount() );
@@ -1026,6 +1101,50 @@ void SwarmMorph::Render( GLuint normals )
 	// FFGL requires the context to be returned in its default state.
 	glBlendFunc( GL_ONE, GL_ZERO );
 	glDisable( GL_BLEND );
+	previousMVP    = mvp;
+	hasPreviousMVP = true;
+}
+
+void SwarmMorph::SetLightUniforms( ffglex::FFGLShader& shader, const swarm::Mat4& view ) const
+{
+	// Light Angle and Height are set relative to the screen (0 deg = from the
+	// camera), so a spinning shape turns through the light; the shader works
+	// in the shape's own space, so the directions are turned back into it.
+	auto toShape = [ &view ]( const float v[ 3 ], float out[ 3 ] ) {
+		for( int i = 0; i < 3; ++i )
+			out[ i ] = view.m[ i * 4 + 0 ] * v[ 0 ] + view.m[ i * 4 + 1 ] * v[ 1 ] + view.m[ i * 4 + 2 ] * v[ 2 ];
+	};
+	float angle     = AngleValue( lightAngle ) * kPi / 180.0f;
+	float elevation = HeightValue( lightHeight ) * kPi / 180.0f;
+	float key[ 3 ]  = { std::sin( angle ) * std::cos( elevation ), std::sin( elevation ), std::cos( angle ) * std::cos( elevation ) };
+	float direction[ 3 ];
+	toShape( key, direction );
+	shader.Set( "uLightDirection", direction[ 0 ], direction[ 1 ], direction[ 2 ] );
+
+	// The point light circles the shape at the key light's height, starting
+	// from the key light's side.
+	const float orbitRadius = 1.3f;
+	float around      = angle + orbitAngle;
+	float orbit[ 3 ]  = { std::sin( around ) * std::cos( elevation ) * orbitRadius, std::sin( elevation ) * orbitRadius,
+						  std::cos( around ) * std::cos( elevation ) * orbitRadius };
+	float lightPosition[ 3 ];
+	toShape( orbit, lightPosition );
+	shader.Set( "uPointLightPosition", lightPosition[ 0 ], lightPosition[ 1 ], lightPosition[ 2 ] );
+
+	// The camera in the shape's space, for the rim.
+	float translation[ 3 ] = { -view.m[ 12 ], -view.m[ 13 ], -view.m[ 14 ] };
+	float eye[ 3 ];
+	toShape( translation, eye );
+	shader.Set( "uEyePosition", eye[ 0 ], eye[ 1 ], eye[ 2 ] );
+
+	float rgb[ 3 ];
+	HsvToRgb( lightH, lightS, lightV * lightA, rgb );
+	shader.Set( "uLightColor", rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
+	shader.Set( "uSelfGlow", selfGlow );
+	shader.Set( "uKeyLight", keyLight );
+	shader.Set( "uRim", rim );
+	shader.Set( "uPointLight", pointLight );
+	shader.Set( "uCenterLight", centerLight );
 }
 
 FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
@@ -1091,6 +1210,18 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_COLOR_MIX: colorMix = value; break;
 	case PID_TWINKLE: twinkle = value; break;
 	case PID_DEPTH_FADE: depthFade = value; break;
+	case PID_LIGHT_H: lightH = value; break;
+	case PID_LIGHT_S: lightS = value; break;
+	case PID_LIGHT_V: lightV = value; break;
+	case PID_LIGHT_A: lightA = value; break;
+	case PID_SELF_GLOW: selfGlow = value; break;
+	case PID_KEY_LIGHT: keyLight = value; break;
+	case PID_LIGHT_ANGLE: lightAngle = value; break;
+	case PID_LIGHT_HEIGHT: lightHeight = value; break;
+	case PID_RIM: rim = value; break;
+	case PID_POINT_LIGHT: pointLight = value; break;
+	case PID_LIGHT_ORBIT: lightOrbit = value; break;
+	case PID_CENTER_LIGHT: centerLight = value; break;
 	case PID_SPIN: spin = value; break;
 	case PID_ROTATE_X: rotateX = value; break;
 	case PID_ROTATE_Y: rotateY = value; break;
@@ -1172,6 +1303,18 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_COLOR_MIX: return colorMix;
 	case PID_TWINKLE: return twinkle;
 	case PID_DEPTH_FADE: return depthFade;
+	case PID_LIGHT_H: return lightH;
+	case PID_LIGHT_S: return lightS;
+	case PID_LIGHT_V: return lightV;
+	case PID_LIGHT_A: return lightA;
+	case PID_SELF_GLOW: return selfGlow;
+	case PID_KEY_LIGHT: return keyLight;
+	case PID_LIGHT_ANGLE: return lightAngle;
+	case PID_LIGHT_HEIGHT: return lightHeight;
+	case PID_RIM: return rim;
+	case PID_POINT_LIGHT: return pointLight;
+	case PID_LIGHT_ORBIT: return lightOrbit;
+	case PID_CENTER_LIGHT: return centerLight;
 	case PID_SPIN: return spin;
 	case PID_ROTATE_X: return rotateX;
 	case PID_ROTATE_Y: return rotateY;
@@ -1239,6 +1382,10 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 			return const_cast< char* >( "off" );
 		snprintf( buffer, sizeof( buffer ), "%.1fx", StreakValue( streakLength ) );
 		return buffer;
+	case PID_SELF_GLOW: snprintf( buffer, sizeof( buffer ), "%.0f%%", selfGlow * 100.0f ); return buffer;
+	case PID_LIGHT_ANGLE: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( lightAngle ) ); return buffer;
+	case PID_LIGHT_HEIGHT: snprintf( buffer, sizeof( buffer ), "%.0f deg", HeightValue( lightHeight ) ); return buffer;
+	case PID_LIGHT_ORBIT: snprintf( buffer, sizeof( buffer ), "%+.2f rps", OrbitValue( lightOrbit ) ); return buffer;
 	case PID_SPIN: snprintf( buffer, sizeof( buffer ), "%.2f rps", SpinValue( spin ) ); return buffer;
 	case PID_ROTATE_X: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( rotateX ) ); return buffer;
 	case PID_ROTATE_Y: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( rotateY ) ); return buffer;
