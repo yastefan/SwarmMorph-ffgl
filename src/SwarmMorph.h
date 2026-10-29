@@ -126,6 +126,7 @@ private:
 	int morphSlot        = 1;
 	float morph          = 0.0f;
 	float particles      = 0.5f;
+	float speed          = 0.5f;
 	float attraction     = 0.35f;
 	float damping        = 0.4f;
 	float chaos          = 0.5f;
@@ -186,6 +187,7 @@ private:
 
 	double lastTime  = -1.0;
 	float simTime    = 0.0f;
+	float swarmTime  = 0.0f;// advances with Speed
 	float noiseTime  = 0.0f;// advances with Flow Speed
 	float buzzTime   = 0.0f;// advances with Buzz Speed
 	float spinAngle  = 0.0f;

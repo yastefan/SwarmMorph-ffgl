@@ -45,6 +45,7 @@ enum ParamID
 	PID_MORPH,
 	PID_MORPH_TO,
 
+	PID_SPEED,
 	PID_ATTRACTION,
 	PID_DAMPING,
 	PID_CHAOS,
@@ -166,6 +167,7 @@ GLuint CreateFloatTexture( GLint internalFormat, GLenum format, const float* pix
 }
 
 // Mappings from the host's normalised 0..1 values to physical quantities.
+float SpeedValue( float v ) { return 2.0f * v; }// time scale of the swarm, 1 = normal
 float AttractionValue( float v ) { return 1.0f + 40.0f * v * v; }
 float DampingValue( float v ) { return 0.15f + 1.35f * v; }// fraction of critical damping
 float TurbulenceValue( float v ) { return v; }
@@ -266,11 +268,12 @@ SwarmMorph::SwarmMorph()
 	SetParamRange( PID_MORPH_TO, 1.0f, static_cast< float >( kNumSlots ) );
 
 	// How the swarm travels from one mesh to the next.
+	SetParamInfof( PID_SPEED, "Speed", FF_TYPE_STANDARD );
 	SetParamInfof( PID_ATTRACTION, "Attraction", FF_TYPE_STANDARD );
 	SetParamInfof( PID_DAMPING, "Damping", FF_TYPE_STANDARD );
 	SetParamInfof( PID_CHAOS, "Chaos", FF_TYPE_STANDARD );
 	SetParamInfof( PID_TURBULENCE, "Turbulence", FF_TYPE_STANDARD );
-	for( unsigned int id = PID_ATTRACTION; id <= PID_TURBULENCE; ++id )
+	for( unsigned int id = PID_SPEED; id <= PID_TURBULENCE; ++id )
 		SetParamGroup( id, "Morph" );
 
 	// How it moves once it has arrived.
@@ -842,8 +845,12 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	pathTravel = std::fmod( pathTravel + deltaTime * PathSpeedValue( pathSpeed ), 1.0f );
 
 	UploadFinishedLoads();
-	noiseTime += deltaTime * FlowSpeedValue( flowSpeed );
-	buzzTime += deltaTime * BuzzSpeedValue( buzzSpeed );
+	// Speed slows or speeds up the particles only; beat, animation and
+	// camera keep running in real time.
+	float swarmDelta = deltaTime * SpeedValue( speed );
+	swarmTime += swarmDelta;
+	noiseTime += swarmDelta * FlowSpeedValue( flowSpeed );
+	buzzTime += swarmDelta * BuzzSpeedValue( buzzSpeed );
 	UpdateBeat( deltaTime );
 	GLuint targets, normals;
 	CurrentTarget( targets, normals );
@@ -851,7 +858,7 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	float morphAmount   = MorphTarget( morphTargets, morphNormals );
 	AdvanceAnimation( activeSlot, deltaTime );
 	AdvanceAnimation( morphActiveSlot, deltaTime );
-	Simulate( deltaTime, targets, normals, morphTargets, morphNormals, morphAmount );
+	Simulate( swarmDelta, targets, normals, morphTargets, morphNormals, morphAmount );
 	Render( morphAmount > 0.5f ? morphNormals : normals );
 	return FF_SUCCESS;
 }
@@ -868,7 +875,7 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals, GLui
 
 	ScopedShaderBinding shaderBinding( updateShader.GetGLID() );
 	updateShader.Set( "uDeltaTime", deltaTime );
-	updateShader.Set( "uTime", simTime );
+	updateShader.Set( "uTime", swarmTime );
 	updateShader.Set( "uAttraction", AttractionValue( attraction ) );
 	updateShader.Set( "uDampingRatio", DampingValue( damping ) );
 	updateShader.Set( "uChaos", chaos );
@@ -1061,6 +1068,7 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 		}
 		break;
 	case PID_PARTICLES: particles = value; break;
+	case PID_SPEED: speed = value; break;
 	case PID_ATTRACTION: attraction = value; break;
 	case PID_DAMPING: damping = value; break;
 	case PID_CHAOS: chaos = value; break;
@@ -1141,6 +1149,7 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_MORPH_TO: return static_cast< float >( morphSlot + 1 );
 	case PID_NORMALIZE: return normalizeMeshes ? 1.0f : 0.0f;
 	case PID_PARTICLES: return particles;
+	case PID_SPEED: return speed;
 	case PID_ATTRACTION: return attraction;
 	case PID_DAMPING: return damping;
 	case PID_CHAOS: return chaos;
@@ -1219,6 +1228,7 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	case PID_DECAY: snprintf( buffer, sizeof( buffer ), "%.2f s", DecaySeconds( decay ) ); return buffer;
 	case PID_BURST: snprintf( buffer, sizeof( buffer ), "%.0f%%", BurstValue( burst ) * 100.0f ); return buffer;
 	case PID_SPIN_STEP: snprintf( buffer, sizeof( buffer ), "%.0f deg", SpinStepValue( spinStep ) ); return buffer;
+	case PID_SPEED: snprintf( buffer, sizeof( buffer ), "%.2fx", SpeedValue( speed ) ); return buffer;
 	case PID_ATTRACTION: snprintf( buffer, sizeof( buffer ), "%.2f", AttractionValue( attraction ) ); return buffer;
 	case PID_DAMPING: snprintf( buffer, sizeof( buffer ), "%.2f", DampingValue( damping ) ); return buffer;
 	case PID_TURBULENCE: snprintf( buffer, sizeof( buffer ), "%.2f", TurbulenceValue( turbulence ) ); return buffer;
