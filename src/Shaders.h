@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include <string>
 
 // All shaders target GLSL 4.10 core, the highest version macOS offers, so the
 // same code runs in Resolume on macOS and Windows.
@@ -340,7 +341,14 @@ void main()
 // comes from a static vertex buffer rather than gl_VertexID: Apple's driver
 // draws attribute-less points about 4x slower. Colour is worked out here, per
 // particle, so the extra look options cost next to nothing.
-static const char kRenderVS[] = R"(#version 410 core
+//
+// Compiled twice: as round points, and with STREAKS defined as capsules that
+// reach back to where the particle was a frame ago. Streaks close the gaps a
+// fast particle leaves between frames, so frame-blending effects such as
+// Resolume's Trails draw continuous curves instead of dotted lines. A streak
+// is a quad per particle (instanced, six corners), shaped into a capsule by
+// the fragment shader with the same falloff as a point.
+static const char kRenderVSBody[] = R"(
 layout( location = 0 ) in float aIndex;
 
 uniform sampler2D uPositions;
@@ -369,6 +377,15 @@ uniform float uShockwave;
 uniform float uWave;     // shockwave progress since the beat: 0 to 1
 uniform float uJitter;
 
+#ifdef STREAKS
+uniform sampler2D uPreviousPositions;// the state a frame ago
+uniform float uStreakLength;         // 1 = back to where the particle was a frame ago
+uniform vec2 uViewport;              // in pixels
+noperspective out vec2 vLocal;       // pixels: along the streak from its tail, and across it
+flat out float vLength;
+flat out float vRadius;
+#endif
+
 out vec4 vColor;
 
 float hash( float n )
@@ -376,15 +393,10 @@ float hash( float n )
 	return fract( sin( n ) * 43758.5453123 );
 }
 
-void main()
+// Moves a simulated position by the beat effects. Head and tail of a streak
+// get the same offset, so the effects themselves don't smear.
+vec3 BeatOffset( vec3 position, ivec2 texel, float seed, out float waveGlow )
 {
-	int index = int( aIndex );
-	ivec2 texel = ivec2( index % uTextureWidth, index / uTextureWidth );
-	vec4 state = texelFetch( uPositions, texel, 0 );
-	vec3 position = state.xyz;
-	float seed = state.w;
-	vec3 velocity = texelFetch( uVelocities, texel, 0 ).xyz;
-
 	if( uBeat > 0.001 )
 	{
 		vec3 normal = texelFetch( uNormals, texel, 0 ).xyz;
@@ -400,7 +412,7 @@ void main()
 	// Shockwave: a pressure ring runs out from the centre, timed to reach the
 	// edge just before the next beat. It slows down as it travels, like a real
 	// wave, and grows wider and fainter; the ring itself glows a little.
-	float waveGlow = 0.0;
+	waveGlow = 0.0;
 	if( uShockwave > 0.0 && uWave < 1.0 )
 	{
 		float radius = length( position );
@@ -410,9 +422,27 @@ void main()
 		waveGlow = exp( -x * x ) * pow( remaining, 1.5 ) * smoothstep( 0.0, 0.08, uWave );
 		position += position / max( radius, 1e-4 ) * ( uShockwave * waveGlow );
 	}
+	return position;
+}
 
+#ifdef STREAKS
+vec2 ToPixels( vec4 clip )
+{
+	return ( clip.xy / clip.w * 0.5 + 0.5 ) * uViewport;
+}
+#endif
+
+void main()
+{
+	int index = int( aIndex );
+	ivec2 texel = ivec2( index % uTextureWidth, index / uTextureWidth );
+	vec4 state = texelFetch( uPositions, texel, 0 );
+	float seed = state.w;
+	vec3 velocity = texelFetch( uVelocities, texel, 0 ).xyz;
+
+	float waveGlow;
+	vec3 position = BeatOffset( state.xyz, texel, seed, waveGlow );
 	vec4 clip = uMVP * vec4( position, 1.0 );
-	gl_Position = clip;
 
 	// Points grow more slowly than true perspective as the camera comes
 	// closer, so close-ups show finer grain instead of a mush of big blobs.
@@ -420,7 +450,41 @@ void main()
 	// right in front of the lens.
 	float closeness = uRefDistance / max( clip.w, 0.05 );
 	float size = uPointSize * pow( closeness, 0.6 );
-	gl_PointSize = clamp( size, 1.0, 48.0 );
+	float drawn = clamp( size, 1.0, 48.0 );
+
+#ifdef STREAKS
+	// The tail: where the particle was a frame ago. A jump (Wrap Edges, a new
+	// particle count) is not a movement, so it gets no streak across the picture.
+	vec3 previous = texelFetch( uPreviousPositions, texel, 0 ).xyz;
+	if( distance( previous, state.xyz ) > 1.5 )
+		previous = state.xyz;
+	float unused;
+	vec3 tail = mix( position, BeatOffset( previous, texel, seed, unused ), uStreakLength );
+	vec4 tailClip = uMVP * vec4( tail, 1.0 );
+	if( tailClip.w < 0.05 )// behind the camera: no streak
+		tailClip = clip;
+
+	vec2 head = ToPixels( clip ), start = ToPixels( tailClip );
+	vec2 axis = head - start;
+	float streak = length( axis );
+	vec2 direction = streak > 1e-3 ? axis / streak : vec2( 1.0, 0.0 );
+	vec2 across = vec2( -direction.y, direction.x );
+	float radius = drawn * 0.5;
+
+	// Two triangles: x picks the tail or head end, y the side.
+	const vec2 corners[ 6 ] = vec2[]( vec2( 0.0, -1.0 ), vec2( 1.0, -1.0 ), vec2( 0.0, 1.0 ),
+									  vec2( 0.0, 1.0 ), vec2( 1.0, -1.0 ), vec2( 1.0, 1.0 ) );
+	vec2 corner = corners[ gl_VertexID ];
+	float distanceAlong = corner.x < 0.5 ? -radius : streak + radius;
+	vec2 pixel = start + direction * distanceAlong + across * ( corner.y * radius );
+	vLocal = vec2( distanceAlong, corner.y * radius );
+	vLength = streak;
+	vRadius = radius;
+	gl_Position = clip.w > 0.05 ? vec4( pixel / uViewport * 2.0 - 1.0, 0.0, 1.0 ) : vec4( 2.0, 2.0, 2.0, 1.0 );
+#else
+	gl_Position = clip;
+	gl_PointSize = drawn;
+#endif
 
 	// 0 at the front of the shape, 1 at the back.
 	float depth = clamp( ( clip.w - uDistance + 1.2 ) / 2.4, 0.0, 1.0 );
@@ -447,6 +511,11 @@ void main()
 	// The smaller close-up points get some of their light back, so zooming in
 	// doesn't dim the shape.
 	float intensity = uBrightness * clamp( size * size, 0.0, 1.0 ) * smoothstep( 0.05, 0.4, clip.w ) * min( pow( closeness, 0.5 ), 3.0 );
+#ifdef STREAKS
+	// A long streak spreads its light a little, so fast particles don't turn
+	// into glaring lines.
+	intensity *= pow( 1.0 + streak / ( 2.0 * radius ), -0.35 );
+#endif
 
 	// Speed Glow: moving particles light up and burn towards white.
 	float glow = smoothstep( 0.15, 1.2, speed ) * uHeat;
@@ -468,17 +537,28 @@ void main()
 }
 )";
 
-// Soft round points, premultiplied, for additive blending.
-static const char kRenderFS[] = R"(#version 410 core
+// Soft round points (or capsules), premultiplied, for additive blending.
+static const char kRenderFSBody[] = R"(
 in vec4 vColor;
+#ifdef STREAKS
+noperspective in vec2 vLocal;
+flat in float vLength;
+flat in float vRadius;
+#endif
 out vec4 fragColor;
 
 uniform float uSoftness;// falloff exponent: below 1 a crisp dot, above 2 a soft glow
 
 void main()
 {
+#ifdef STREAKS
+	// Distance to the streak's centre line, relative to its radius.
+	float beyond = vLocal.x - clamp( vLocal.x, 0.0, vLength );
+	float r2 = ( beyond * beyond + vLocal.y * vLocal.y ) / ( vRadius * vRadius );
+#else
 	vec2 c = gl_PointCoord * 2.0 - 1.0;
 	float r2 = dot( c, c );
+#endif
 	if( r2 > 1.0 )
 		discard;
 	// Scaled so every softness gives a point the same total light.
@@ -486,4 +566,10 @@ void main()
 	fragColor = vec4( vColor.rgb * alpha, alpha );
 }
 )";
+
+// Full render shader source: points, or capsule streaks.
+inline std::string RenderShaderSource( const char* body, bool streaks )
+{
+	return std::string( "#version 410 core\n" ) + ( streaks ? "#define STREAKS\n" : "" ) + body;
+}
 }// namespace swarm
