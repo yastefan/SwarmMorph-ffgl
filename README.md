@@ -11,14 +11,21 @@ SwarmMorph is a native FFGL source plugin for **Resolume Arena and Avenue** on
 **macOS and Windows**. Everything runs on the GPU, so it stays smooth at full
 HD and beyond.
 
-- Morph between up to 8 models at the push of a MIDI pad or on the beat
+| | |
+|---|---|
+| ![A cube of blue particles lit from the side](docs/images/cube.jpg) | ![A glowing particle jellyfish](docs/images/jellyfish.jpg) |
+| ![Rolling waves of purple particles](docs/images/ocean.jpg) | ![A sphere of particles over a particle field](docs/images/sphere.jpg) |
+
+- Morph between two models, or split the swarm across both; 14 built-in shapes, five of them animated
 - 10,000 to 1,048,576 particles
 - Animated meshes from Blender, Cinema 4D, Houdini or Maya as Alembic (`.abc`) or OBJ sequences
 - Wind, gusts, vortex and explode forces that bend the shape and let it spring back
 - Blow particles off the shape and across the screen, wrapping around the edges
 - Swirl, buzz and a free-spinning camera
-- Beat effects locked to Resolume's BPM: pulse, shockwave, burst, jitter, flash, spin steps and auto-advance
+- Beat effects locked to Resolume's BPM: pulse, shockwave, burst, jitter, flash, and spin steps
 - Two-colour gradients by speed, height or depth, random sparks, twinkle and depth fog
+- Key, rim and centre lights in their own colours, streaks and built-in trails
+- Ready-made presets that install themselves
 - Meshes load in the background, so loading a new file mid-show doesn't drop frames
 
 ## Download and install
