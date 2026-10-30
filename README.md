@@ -45,6 +45,16 @@ HD and beyond.
 
 5. Start Resolume. SwarmMorph appears in the **Sources** tab.
 
+### Presets
+
+SwarmMorph comes with presets: BPM Box, BPM Time Bomb, Borg Cube, Cyber
+Ocean, Grunge Donut, Jealous Jellyfish, Mystic Ball and Stormy Crysis. The
+first time you use the plugin, it copies them into
+`Documents/Resolume Arena/Presets/Sources/SwarmMorph` (and the Avenue folder,
+if you have one); restart Resolume once if the preset menu doesn't show them
+yet. Presets you already have there are never overwritten, and a preset you
+delete stays deleted. The zip also holds them in `Presets`, to copy by hand.
+
 Requirements: Resolume Arena or Avenue 7 (developed with Arena 7.28) and a
 graphics card with OpenGL 4.1, which every Mac and Windows GPU of the last
 decade has. Macs with Intel or Apple Silicon are both supported.
@@ -353,6 +363,12 @@ GitHub Actions builds a universal macOS bundle and an x64 Windows DLL:
    The workflow refuses tags that don't match the project version, and
    publishes the release with notes generated from the merged pull requests.
    The plugin reports the major and minor version to Resolume.
+
+**Presets:** save a preset in Resolume, then copy its `.xml` from
+`Documents/Resolume Arena/Presets/Sources/SwarmMorph` into `presets/`. The
+build embeds every file there, and the plugin installs new ones on first use.
+Presets store each parameter by its name, so renaming a parameter loses its
+value in existing presets; keep names stable once presets use them.
 
 ### Testing without Resolume (macOS)
 
