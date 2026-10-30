@@ -55,7 +55,8 @@ decade has. Macs with Intel or Apple Silicon are both supported.
    You'll see a sphere of particles.
 2. Push **Morph** (in the **Meshes** group) to 100 %, and watch the swarm
    fly from the sphere to a torus. Pick other built-in forms under **Shape**
-   in the **Mesh 1** and **Mesh 2** groups.
+   in the **Mesh 1** and **Mesh 2** groups; the last five (Heartbeat,
+   Superform, Jellyfish, Bloom, Ocean) move by themselves.
 3. For your own models, choose an `.obj` or `.abc` file under **Mesh 1** or
    **Mesh 2**; it replaces that group's shape. Clear the file to get the
    shape back.
@@ -80,11 +81,15 @@ for the command).
 - **Off-centre:** **Anchor X/Y/Z** picks the point of each mesh that sits at
   the centre. Shift Mesh 2's anchor and the swarm travels across the
   picture while it morphs; with **Spin**, the shape orbits round the anchor
-  instead of turning on the spot.
+  instead of turning on the spot. **Scale** sizes each mesh around its
+  anchor, so a small sphere can morph into a huge cube that fills the screen.
 - **Two at once:** with **Split** at 100 % and Morph at 50 %, both meshes
   stand in the picture, each with half the particles. Give them different
   anchors to put them side by side; moving Morph then lets the swarm
   trickle over from one shape to the other.
+- **Living shapes:** the animated shapes run on their own. The swarm
+  smooths quick motion, so **Heartbeat** breathes softly at the default
+  **Attraction**; raise Attraction to near 100 % for a sharp double beat.
 - **On the beat:** the **Beat** effects follow Resolume's BPM by themselves.
   Leave **Beat Rate** on 1 Beat, raise **Pulse** or **Shockwave** a little,
   and the shape breathes with the music. Set Beat Rate to Off and map **Hit**
@@ -154,11 +159,13 @@ The parameters appear in Resolume in this order:
 |           | Split             | 0: every particle glides together, so halfway the swarm is a cloud between the meshes. 1: each particle switches over at its own point of the fader, so halfway half the swarm sits on each mesh |
 |           | Normalize         | Centre each mesh and scale it to the unit sphere |
 |           | OBJ Sequences     | Detect numbered sequences; turn off to load such files as single meshes |
-| Mesh 1    | Shape 1           | Built-in form: Sphere, Cube, Torus, Knot, Cylinder, Cone, Helix, Wave or Plane |
+| Mesh 1    | Shape 1           | Built-in form: Sphere, Cube, Torus, Knot, Cylinder, Cone, Helix, Wave or Plane, or an animated one: Heartbeat, Superform (sphere → cube → octahedron → star), Jellyfish, Bloom or Ocean (a 6-second loop that follows Anim Speed and Ping Pong) |
 |           | Mesh 1            | `.obj` or `.abc` file; replaces the shape while it is set |
+|           | Scale 1           | Size of the mesh around its anchor, ¼× to 4× (centre = 1×) |
 |           | Anchor 1 X/Y/Z    | The point of the mesh that sits at the centre, where Spin, Rotate and the camera turn around; ±2 units, centre = the mesh's own centre. Raising X moves the mesh left |
 | Mesh 2    | Shape 2           | Built-in form that Morph blends towards (Torus at first) |
 |           | Mesh 2            | `.obj` or `.abc` file; replaces the shape while it is set |
+|           | Scale 2           | The same for Mesh 2 |
 |           | Anchor 2 X/Y/Z    | The same for Mesh 2 |
 | Morph     | Speed             | Time scale of the particles: 1× in the middle, 0 freezes them, 2× doubles the pace. Beat, animation and camera keep real time |
 | Morph     | Attraction        | Spring strength: how fast particles reach the new shape, and how firmly they hold it |

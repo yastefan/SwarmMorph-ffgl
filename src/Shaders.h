@@ -41,6 +41,8 @@ uniform float uMorph;         // 0 = Mesh 1, 1 = Mesh 2
 uniform float uSplit;         // 0 = all glide together, 1 = each switches at its own point
 uniform vec3 uAnchor;         // Mesh 1's point that sits at the centre
 uniform vec3 uMorphAnchor;    // the same for Mesh 2
+uniform float uScale;         // Mesh 1's size around its anchor
+uniform float uMorphScale;
 uniform float uBeatKick;      // 1 only on the frame of a beat
 uniform float uSpawn;         // 1 only on the frame the swarm respawns
 uniform int uSpawnFrom;       // 0 scatter, 1 centre, 2 far
@@ -203,15 +205,16 @@ void main()
 	float seed = state.w;
 	vec3 position = state.xyz;
 	vec3 velocity = texelFetch( uVelocities, texel, 0 ).xyz;
-	// Anchor: each mesh is moved so its anchor point sits at the centre.
-	vec3 target = texelFetch( uTargets, texel, 0 ).xyz - uAnchor;
+	// Anchor: each mesh is moved so its anchor point sits at the centre, and
+	// scaled around it.
+	vec3 target = ( texelFetch( uTargets, texel, 0 ).xyz - uAnchor ) * uScale;
 	vec3 normal = texelFetch( uNormals, texel, 0 ).xyz;
 	// Morph fader: the particle's goal slides from its spot on one mesh to its
 	// spot on the other, so the swarm follows the fader with its usual physics.
 	if( uMorph > 0.0 )
 	{
 		float weight = MorphWeight( seed );
-		target = mix( target, texelFetch( uMorphTargets, texel, 0 ).xyz - uMorphAnchor, weight );
+		target = mix( target, ( texelFetch( uMorphTargets, texel, 0 ).xyz - uMorphAnchor ) * uMorphScale, weight );
 		vec3 blended = mix( normal, texelFetch( uMorphNormals, texel, 0 ).xyz, weight );
 		float lengthSq = dot( blended, blended );
 		normal = lengthSq > 1e-8 ? blended * inversesqrt( lengthSq ) : vec3( 0.0 );
@@ -452,6 +455,8 @@ uniform float uMorph;     // 0 = Mesh 1, 1 = Mesh 2
 uniform float uSplit;
 uniform vec3 uAnchor;     // each mesh's point that sits at the centre
 uniform vec3 uMorphAnchor;
+uniform float uScale;
+uniform float uMorphScale;
 uniform vec3 uLightColor;
 uniform float uSelfGlow;// the particles' own light, in their colour
 uniform float uKeyLight;
@@ -496,15 +501,15 @@ float MorphWeight( float seed )
 	return mix( uMorph, switched, uSplit );
 }
 
-// A particle's spot on a mesh, moved by the mesh's anchor, and the surface
+// A particle's spot on a mesh, moved by the mesh's anchor and scaled, and the surface
 // normal there; point clouds point away from the mesh's centre.
-vec3 MeshSpot( sampler2D targets, sampler2D normals, vec3 anchor, ivec2 texel, out vec3 normal )
+vec3 MeshSpot( sampler2D targets, sampler2D normals, vec3 anchor, float scale, ivec2 texel, out vec3 normal )
 {
 	vec3 spot = texelFetch( targets, texel, 0 ).xyz;
 	normal = texelFetch( normals, texel, 0 ).xyz;
 	if( dot( normal, normal ) == 0.0 )
 		normal = spot / max( length( spot ), 1e-4 );
-	return spot - anchor;
+	return ( spot - anchor ) * scale;
 }
 
 // Moves a simulated position by the beat effects. Head and tail of a streak
@@ -641,8 +646,8 @@ void main()
 		// still near the mesh the fader is moving away from, so the light
 		// hands over smoothly when the fader moves.
 		vec3 normal1, normal2;
-		vec3 spot1 = MeshSpot( uTargets, uNormals, uAnchor, texel, normal1 );
-		vec3 spot2 = MeshSpot( uMorphTargets, uMorphNormals, uMorphAnchor, texel, normal2 );
+		vec3 spot1 = MeshSpot( uTargets, uNormals, uAnchor, uScale, texel, normal1 );
+		vec3 spot2 = MeshSpot( uMorphTargets, uMorphNormals, uMorphAnchor, uMorphScale, texel, normal2 );
 		float weight = MorphWeight( seed );
 		vec3 goal = mix( spot1, spot2, weight );
 		vec3 goalNormal = mix( normal1, normal2, weight );

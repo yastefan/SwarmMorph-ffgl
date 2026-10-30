@@ -43,11 +43,13 @@ enum ParamID
 
 	PID_SHAPE1,
 	PID_MESH1,// a file here replaces the shape
+	PID_SCALE1,
 	PID_ANCHOR1_X,// X, Y and Z in a row; the shader moves the mesh by -anchor
 	PID_ANCHOR1_Y,
 	PID_ANCHOR1_Z,
 	PID_SHAPE2,
 	PID_MESH2,
+	PID_SCALE2,
 	PID_ANCHOR2_X,
 	PID_ANCHOR2_Y,
 	PID_ANCHOR2_Z,
@@ -268,6 +270,9 @@ int MeshSlot( unsigned int index )
 // Anchor: the point of the mesh that sits at the centre, where Spin, Rotate
 // and the camera turn around. Centred slider = the mesh's own centre.
 float AnchorValue( float v ) { return CentredForce( v, 2.0f ); }
+
+// Scale: the mesh's size around its anchor, 1/4x to 4x, 1x centred.
+float ScaleValue( float v ) { return std::pow( 4.0f, 2.0f * v - 1.0f ); }
 }// namespace
 
 SwarmMorph::SwarmMorph()
@@ -289,7 +294,7 @@ SwarmMorph::SwarmMorph()
 		SetParamGroup( id, "Meshes" );
 
 	// Each mesh in its own collapsible group: a built-in shape, a file that
-	// replaces it, and the anchor.
+	// replaces it, its size and the anchor.
 	std::vector< std::string > extensions{ "obj" };
 	if( swarm::AlembicSupported() )
 		extensions.push_back( "abc" );
@@ -297,16 +302,18 @@ SwarmMorph::SwarmMorph()
 	for( int i = 0; i < kNumSlots; ++i )
 	{
 		std::string mesh = "Mesh " + std::to_string( i + 1 );
+		std::string scaleName  = "Scale " + std::to_string( i + 1 );
 		std::string anchorName = "Anchor " + std::to_string( i + 1 );
 		std::string shapeName  = "Shape " + std::to_string( i + 1 );
 		SetOptionParamInfo( meshParams[ i ] - 1, shapeName.c_str(), swarm::ShapeCount(), static_cast< float >( shape[ i ] ) );
 		for( int s = 0; s < swarm::ShapeCount(); ++s )
 			SetParamElementInfo( meshParams[ i ] - 1, s, swarm::ShapeName( s ), static_cast< float >( s ) );
 		SetFileParamInfo( meshParams[ i ], mesh.c_str(), extensions, "" );
+		SetParamInfo( meshParams[ i ] + 1, scaleName.c_str(), FF_TYPE_STANDARD, scale[ i ] );
 		const char* axes[] = { " X", " Y", " Z" };
 		for( unsigned int axis = 0; axis < 3; ++axis )
-			SetParamInfof( meshParams[ i ] + 1 + axis, ( anchorName + axes[ axis ] ).c_str(), FF_TYPE_STANDARD );
-		for( unsigned int id = meshParams[ i ] - 1; id <= meshParams[ i ] + 3; ++id )
+			SetParamInfof( meshParams[ i ] + 2 + axis, ( anchorName + axes[ axis ] ).c_str(), FF_TYPE_STANDARD );
+		for( unsigned int id = meshParams[ i ] - 1; id <= meshParams[ i ] + 4; ++id )
 			SetParamGroup( id, mesh );
 	}
 
@@ -617,8 +624,7 @@ void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
 			bool loaded = false;
 			if( job->path.empty() )
 			{
-				sequence.firstFrame = swarm::MakeShape( job->shape );
-				sequence.frames.push_back( sequence.firstFrame.positions );
+				sequence = swarm::MakeShape( job->shape );
 				loaded = true;
 			}
 			else if( IsAlembicPath( job->path ) )
@@ -697,7 +703,7 @@ void SwarmMorph::UploadFinishedLoads()
 			UploadAnimation( slot, *job );
 			char fps[ 16 ];
 			snprintf( fps, sizeof( fps ), "%.3g", slot.fps );
-			std::string message = "SwarmMorph: loaded " + std::to_string( slot.frames.size() ) + "-frame animation at " + fps + " fps: " + job->path;
+			std::string message = "SwarmMorph: loaded " + std::to_string( slot.frames.size() ) + "-frame animation at " + fps + " fps: " + ( job->path.empty() ? std::string( swarm::ShapeName( job->shape ) ) : job->path );
 			FFGLLog::LogToHost( message.c_str() );
 		}
 		slot.loaded = true;
@@ -1129,6 +1135,8 @@ void SwarmMorph::SetAnchorUniforms( ffglex::FFGLShader& shader ) const
 	shader.Set( "uSplit", split );
 	shader.Set( "uAnchor", AnchorValue( anchor[ 0 ][ 0 ] ), AnchorValue( anchor[ 0 ][ 1 ] ), AnchorValue( anchor[ 0 ][ 2 ] ) );
 	shader.Set( "uMorphAnchor", AnchorValue( anchor[ 1 ][ 0 ] ), AnchorValue( anchor[ 1 ][ 1 ] ), AnchorValue( anchor[ 1 ][ 2 ] ) );
+	shader.Set( "uScale", ScaleValue( scale[ 0 ] ) );
+	shader.Set( "uMorphScale", ScaleValue( scale[ 1 ] ) );
 }
 
 void SwarmMorph::SetLightUniforms( ffglex::FFGLShader& shader, const swarm::Mat4& view ) const
@@ -1199,6 +1207,8 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 		}
 		break;
 	}
+	case PID_SCALE1: scale[ 0 ] = value; break;
+	case PID_SCALE2: scale[ 1 ] = value; break;
 	case PID_ANCHOR1_X:
 	case PID_ANCHOR1_Y:
 	case PID_ANCHOR1_Z: anchor[ 0 ][ index - PID_ANCHOR1_X ] = value; break;
@@ -1305,6 +1315,8 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 {
 	switch( index )
 	{
+	case PID_SCALE1: return scale[ 0 ];
+	case PID_SCALE2: return scale[ 1 ];
 	case PID_ANCHOR1_X:
 	case PID_ANCHOR1_Y:
 	case PID_ANCHOR1_Z: return anchor[ 0 ][ index - PID_ANCHOR1_X ];
@@ -1418,6 +1430,8 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	case PID_PARTICLES: snprintf( buffer, sizeof( buffer ), "%d", ParticleCount() ); return buffer;
 	case PID_MORPH: snprintf( buffer, sizeof( buffer ), "%.0f%%", morph * 100.0f ); return buffer;
 	case PID_SPLIT: snprintf( buffer, sizeof( buffer ), "%.0f%%", split * 100.0f ); return buffer;
+	case PID_SCALE1:
+	case PID_SCALE2: snprintf( buffer, sizeof( buffer ), "%.2fx", ScaleValue( scale[ index == PID_SCALE2 ? 1 : 0 ] ) ); return buffer;
 	case PID_ANCHOR1_X:
 	case PID_ANCHOR1_Y:
 	case PID_ANCHOR1_Z: snprintf( buffer, sizeof( buffer ), "%+.2f", AnchorValue( anchor[ 0 ][ index - PID_ANCHOR1_X ] ) ); return buffer;
