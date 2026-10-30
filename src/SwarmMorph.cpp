@@ -10,6 +10,7 @@
 #include <thread>
 #include "AlembicLoader.h"
 #include "CameraPaths.h"
+#include "Presets.h"
 #include "Shapes.h"
 #include "MathUtil.h"
 #include "MeshSampler.h"
@@ -462,6 +463,15 @@ SwarmMorph::~SwarmMorph() = default;
 
 FFResult SwarmMorph::InitGL( const FFGLViewportStruct* vp )
 {
+	// Once per session: put the built-in presets where Resolume finds them.
+	static bool presetsChecked = false;
+	if( !presetsChecked )
+	{
+		presetsChecked      = true;
+		std::string message = swarm::InstallPresets();
+		if( !message.empty() )
+			FFGLLog::LogToHost( ( "SwarmMorph: " + message ).c_str() );
+	}
 	if( !CreateGLResources() )
 	{
 		FFGLLog::LogToHost( "SwarmMorph: failed to create GL resources" );

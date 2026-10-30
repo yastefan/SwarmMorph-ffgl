@@ -81,9 +81,20 @@ add_library(SwarmMorph MODULE
     src/MathUtil.h
     src/CameraPaths.h
     src/CameraPaths.cpp
+    src/Presets.h
+    src/Presets.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/PresetData.cpp
     ${FFGL_DIR}/source/lib/FFGLSDK.cpp
 )
 target_include_directories(SwarmMorph PRIVATE src ${FFGL_DIR}/source/lib)
+# The Resolume presets in presets/ are built in; the plugin installs them.
+file(GLOB SWARMMORPH_PRESETS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/presets/*.xml)
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/PresetData.cpp
+    COMMAND ${CMAKE_COMMAND} -DPRESET_DIR=${CMAKE_CURRENT_SOURCE_DIR}/presets
+            -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/PresetData.cpp -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedPresets.cmake
+    DEPENDS ${SWARMMORPH_PRESETS} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedPresets.cmake
+    COMMENT "Embedding presets")
 # Imath sets a global "_d" debug postfix; the host and harness expect the plain name.
 set_target_properties(SwarmMorph PROPERTIES DEBUG_POSTFIX "")
 target_link_libraries(SwarmMorph PRIVATE swarmmorph-mesh)
@@ -110,7 +121,7 @@ elseif(WIN32)
     set(GLEW_DIR ${FFGL_DIR}/deps/glew-2.1.0)
     target_include_directories(SwarmMorph PRIVATE ${GLEW_DIR}/include)
     target_compile_definitions(SwarmMorph PRIVATE GLEW_STATIC _CRT_SECURE_NO_WARNINGS NOMINMAX)
-    target_link_libraries(SwarmMorph PRIVATE ${GLEW_DIR}/lib/Release/x64/glew32s.lib opengl32)
+    target_link_libraries(SwarmMorph PRIVATE ${GLEW_DIR}/lib/Release/x64/glew32s.lib opengl32 shell32 ole32)
     set_target_properties(SwarmMorph PROPERTIES PREFIX "")
 endif()
 
