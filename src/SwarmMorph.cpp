@@ -254,7 +254,7 @@ void HsvToRgb( float h, float s, float v, float rgb[ 3 ] )
 float StreakValue( float v ) { return 2.0f * v; }// 1 = back to where the particle was a frame ago
 float PathSpeedValue( float v ) { return 0.2f * v * v; }// loops per second; 1 = one loop in 5 s
 float AnimSpeedValue( float v ) { return 3.0f * v; }
-float SurfaceFlowValue( float v ) { return 0.4f * v; }
+float SurfaceFlowValue( float v ) { return 0.6f * v; }
 float HoverValue( float v ) { return 0.25f * v; }
 float FlowSpeedValue( float v ) { return 2.0f * v; }
 float BuzzValue( float v ) { return 0.15f * v; }
