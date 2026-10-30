@@ -112,15 +112,18 @@ for the command).
   timeline (or a BPM-synced saw) for a continuous move that loops cleanly.
   **Fly Through** dives into the swarm and turns round inside it;
   **Vertigo** is a dolly zoom. Spin, Rotate and Zoom still work on top.
-- **Light trails:** put Resolume's **Trails** effect on the clip and raise
-  **Streaks** to about 0.5: blown-away and bursting particles draw smooth
-  curves instead of dotted lines.
+- **Light trails:** raise **Trails** (in **Look**) and **Streaks** to about
+  0.5: blown-away and bursting particles draw smooth, fading curves instead
+  of dotted lines. Resolume's own Trails effect on the clip works too.
   If long trails make the swarm look too hectic, lower **Speed**.
+- **Tunnel:** **Trails** up and **Trail Zoom** to the right: the tails stream
+  outwards from the centre, like flying through the swarm. To the left they
+  are sucked inwards.
 - **Sculpted light:** lower **Self Glow** to about 10 %, then raise
-  **Key Light** and some **Rim**: the shape gets a lit and a dark side. Add
-  **Point Light** with some **Light Orbit** and a warm **Light Color** for a
-  lamp that sweeps round it. Key light and rim only reach particles near the
-  surface; free-flying ones keep their Self Glow.
+  **Key Light** and some **Rim**: the shape gets a lit and a dark side. Give
+  them different colours, say a warm **Key Color** and a cool **Rim Color**,
+  for a film look. Key light and rim only reach particles near the surface;
+  free-flying ones keep their Self Glow.
 - **Lantern:** **Self Glow** near 0 and **Center Light** up: the shape glows
   from inside, and particles blown out of it fade into the dark.
 - **Fly-in on clip change:** turn on **Spawn On Start** and pick a
@@ -203,6 +206,8 @@ The parameters appear in Resolume in this order:
 |           | Point Size        | In pixels at 1080p and the default distance; points grow more slowly than the shape when the camera comes close, so close-ups stay fine-grained |
 |           | Softness          | From crisp dots to soft glowing blobs; the total light stays the same |
 |           | Streaks           | Draw each particle as a streak back to where it was a frame ago (0.5 = exactly that far, 1 = twice). Fast particles, and a shape turning with Spin or a camera path, then leave continuous lines under Resolume's Trails instead of dotted ones. Costs more GPU time than round points. |
+|           | Trails            | Feedback: particles leave tails that fade out within 0.1–4 s (off at 0). The brighter of tail and particle wins, so a shape that holds still doesn't burn out. Clears when the clip starts |
+|           | Trail Zoom        | The tails grow outwards (right) or shrink inwards (left) each frame, for a tunnel; centre = still |
 |           | Brightness        | Additive intensity |
 |           | Color             | Base colour (a colour picker; its alpha sets how strongly it shines) |
 |           | Color 2           | Second colour, used by Color Mode |
@@ -211,15 +216,15 @@ The parameters appear in Resolume in this order:
 |           | Speed Glow        | Moving particles light up and burn towards white, e.g. while they morph |
 |           | Twinkle           | Each particle flares up now and then at its own rhythm |
 |           | Depth Fade        | The back of the shape fades into darkness, like fog |
-| Light     | Light Color       | Colour picker for all lights; lit parts take on this colour (white = a paler shade of the particle colour) |
-|           | Self Glow         | The particles' own light in their colour (and their Speed Glow). 100 % = as before; lower it to let the lights below shape the swarm |
+| Light     | Self Glow         | The particles' own light in their colour (and their Speed Glow). 100 % = as before; lower it to let the lights below shape the swarm |
 |           | Key Light         | Light from one direction: the side facing it lights up, the far side stays at Self Glow |
+|           | Key Color         | Colour picker for the key light; lit parts take on this colour (white = a paler shade of the particle colour) |
 |           | Light Angle       | Where the key light comes from, relative to the screen: 0° = from the camera, ±90° = from the side, ±180° = from behind |
 |           | Light Height      | Key light from above (+) or below (−) |
 |           | Rim               | Glow along the outline, where the surface turns away from the camera |
-|           | Point Light       | A light circling the shape that lights a pool of particles near it, even ones in flight |
-|           | Light Orbit       | How fast the point light circles, centre = still; it starts on the key light's side |
+|           | Rim Color         | Colour of the rim |
 |           | Center Light      | A lamp inside the shape, as if in fog: particles near the centre light up, whichever way they face |
+|           | Center Color      | Colour of the centre light |
 | Camera    | Spin              | Continuous rotation, centre = still (the default) |
 |           | Rotate X/Y, Zoom  | Camera orientation and distance |
 |           | Path              | Camera move: Off, Orbit, Wave Orbit, Spiral, Fly Through, Close Pass, Crane or Vertigo |
