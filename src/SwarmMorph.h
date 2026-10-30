@@ -13,7 +13,7 @@
 class SwarmMorph : public CFFGLPlugin
 {
 public:
-	static constexpr int kNumSlots       = 8;
+	static constexpr int kNumSlots       = 2;// Mesh 1 and Mesh 2, crossfaded by Morph
 	static constexpr int kTextureWidth   = 1024;
 	static constexpr int kMaxParticles   = kTextureWidth * kTextureWidth;
 	static constexpr int kMinParticles   = 10000;
@@ -37,7 +37,8 @@ private:
 	// own reference, so replacing a pending job never blocks the host.
 	struct LoadJob
 	{
-		std::string path;
+		std::string path;                          // empty: build the built-in shape instead
+		int shape = 0;
 		std::vector< float > points;              // static mesh: target xyz per particle
 		std::vector< float > normals;             // static mesh: surface normal per particle
 		swarm::SurfaceBinding binding;            // animated mesh: where each particle sits
@@ -91,7 +92,6 @@ private:
 	void UploadFinishedLoads();
 	void UploadAnimation( Slot& slot, LoadJob& job );
 	void ReleaseSlotGL( Slot& slot );
-	void SelectNextLoadedSlot();
 	void CurrentTarget( GLuint& targets, GLuint& normals );
 	void UpdateBeat( float deltaTime );
 	float MorphTarget( GLuint& targets, GLuint& normals );// returns the morph amount, 0 if unused
@@ -99,10 +99,11 @@ private:
 	double FramePosition( const Slot& slot ) const;
 	int ParticleCount() const;
 	void Simulate( float deltaTime, GLuint targets, GLuint normals, GLuint morphTargets, GLuint morphNormals, float morphAmount );
-	// targets/normals: the shape the swarm is closest to, for the beat effects
-	// and the light; other*: the shape it is coming from or blending with, so
-	// the light doesn't drop out when the target changes.
-	void Render( GLuint targets, GLuint normals, GLuint otherTargets, GLuint otherNormals );
+	// Both meshes and the Morph between them, for the beat effects and the
+	// light; mesh2* is Mesh 2 whenever it is loaded, even at Morph 0, so the
+	// light hands over smoothly when the fader moves.
+	void Render( GLuint targets, GLuint normals, GLuint mesh2Targets, GLuint mesh2Normals, float morphAmount );
+	void SetAnchorUniforms( ffglex::FFGLShader& shader ) const;
 	void SlotTextures( int slot, GLuint& targets, GLuint& normals ) const;
 	void SetLightUniforms( ffglex::FFGLShader& shader, const swarm::Mat4& view ) const;
 	struct Camera
@@ -116,9 +117,8 @@ private:
 
 	Slot slots[ kNumSlots ];
 	GLuint fallbackTexture   = 0;
-	int activeSlot           = -1;// slot the swarm is heading to; -1 = fallback sphere
-	int morphActiveSlot      = -1;// slot Morph blends towards; -1 = none
-	int leftSlot             = -2;// slot the swarm last left, for the light; -1 = sphere, -2 = none
+	int activeSlot           = -1;// Mesh 1 once loaded; -1 = fallback sphere
+	int morphActiveSlot      = -1;// Mesh 2 while Morph is up; -1 = none
 	StateBuffer state[ 2 ];// ping-ponged
 	int front                = 0;// index of the state holding the latest frame
 	GLuint emptyVAO          = 0;// core profile needs a bound VAO even without attributes
@@ -133,9 +133,10 @@ private:
 	ffglex::FFGLShader streakShader;// renderShader drawing capsules from last frame's position
 
 	// Parameters, stored as the host's normalised values.
-	int targetSlot       = 0;
-	int morphSlot        = 1;
 	float morph          = 0.0f;
+	int shape[ kNumSlots ] = { 0, 2 };// Sphere and Torus until a file is chosen
+	float split          = 0.0f;// 0 = glide through the middle, 1 = each particle switches on its own
+	float anchor[ kNumSlots ][ 3 ] = { { 0.5f, 0.5f, 0.5f }, { 0.5f, 0.5f, 0.5f } };// centred = no shift
 	float particles      = 0.5f;
 	float speed          = 0.5f;
 	float attraction     = 0.35f;
@@ -172,7 +173,7 @@ private:
 	float lightOrbit     = 0.5f;// still
 	float centerLight    = 0.0f;
 	float depthFade      = 0.0f;
-	float spin           = 0.55f;
+	float spin           = 0.5f;// still
 	float rotateX        = 0.5f;
 	float rotateY        = 0.5f;
 	float zoom           = 0.5f;
@@ -204,9 +205,12 @@ private:
 	float jitter         = 0.0f;
 	float flash          = 0.0f;
 	float spinStep       = 0.0f;
-	int autoNext         = 0;
 	bool normalizeMeshes = true;
-	bool nextPressed     = false;
+	int spawnFrom        = 0;// 0 scatter, 1 centre, 2 far
+	bool spawnOnStart    = false;
+	bool spawnPressed    = false;
+	bool spawnPending    = false;// respawn on the next frame
+	float spawnSeed      = 0.0f;
 
 	double lastTime  = -1.0;
 	float simTime    = 0.0f;

@@ -35,10 +35,16 @@ uniform sampler2D uPositions; // xyz, w = per-particle random seed in [0, 1)
 uniform sampler2D uVelocities;// xyz, w unused
 uniform sampler2D uTargets;   // xyz = this particle's point on the target mesh
 uniform sampler2D uNormals;   // xyz = surface normal there; zero for point clouds
-uniform sampler2D uMorphTargets;// the same for the Morph To mesh
+uniform sampler2D uMorphTargets;// the same for Mesh 2
 uniform sampler2D uMorphNormals;
-uniform float uMorph;         // 0 = Target, 1 = Morph To
+uniform float uMorph;         // 0 = Mesh 1, 1 = Mesh 2
+uniform float uSplit;         // 0 = all glide together, 1 = each switches at its own point
+uniform vec3 uAnchor;         // Mesh 1's point that sits at the centre
+uniform vec3 uMorphAnchor;    // the same for Mesh 2
 uniform float uBeatKick;      // 1 only on the frame of a beat
+uniform float uSpawn;         // 1 only on the frame the swarm respawns
+uniform int uSpawnFrom;       // 0 scatter, 1 centre, 2 far
+uniform float uSpawnSeed;     // new random start per spawn
 uniform float uBeatSeed;      // new random pick per beat
 uniform float uBurst;         // share of particles
 
@@ -71,6 +77,25 @@ layout( location = 1 ) out vec4 oVelocity;
 float hash( float n )
 {
 	return fract( sin( n ) * 43758.5453123 );
+}
+
+// PCG hash to [0, 1).
+float pcg( uint v )
+{
+	uint state = v * 747796405u + 2891336453u;
+	uint word = ( ( state >> ( ( state >> 28u ) + 4u ) ) ^ state ) * 277803737u;
+	return float( ( word >> 22u ) ^ word ) / 4294967296.0;
+}
+
+// How far this particle has gone over to Mesh 2. Without Split all glide
+// together with the fader; with Split each one switches at its own point of
+// the fader, so halfway half the swarm sits on each mesh. Same in the render
+// shader, so the light knows which mesh a particle belongs to.
+float MorphWeight( float seed )
+{
+	float threshold = 0.02 + 0.96 * hash( seed * 41.3 );
+	float switched = smoothstep( threshold - 0.02, threshold + 0.02, uMorph );
+	return mix( uMorph, switched, uSplit );
 }
 
 uvec3 pcg3d( uvec3 v )
@@ -178,14 +203,16 @@ void main()
 	float seed = state.w;
 	vec3 position = state.xyz;
 	vec3 velocity = texelFetch( uVelocities, texel, 0 ).xyz;
-	vec3 target = texelFetch( uTargets, texel, 0 ).xyz;
+	// Anchor: each mesh is moved so its anchor point sits at the centre.
+	vec3 target = texelFetch( uTargets, texel, 0 ).xyz - uAnchor;
 	vec3 normal = texelFetch( uNormals, texel, 0 ).xyz;
 	// Morph fader: the particle's goal slides from its spot on one mesh to its
 	// spot on the other, so the swarm follows the fader with its usual physics.
 	if( uMorph > 0.0 )
 	{
-		target = mix( target, texelFetch( uMorphTargets, texel, 0 ).xyz, uMorph );
-		vec3 blended = mix( normal, texelFetch( uMorphNormals, texel, 0 ).xyz, uMorph );
+		float weight = MorphWeight( seed );
+		target = mix( target, texelFetch( uMorphTargets, texel, 0 ).xyz - uMorphAnchor, weight );
+		vec3 blended = mix( normal, texelFetch( uMorphNormals, texel, 0 ).xyz, weight );
 		float lengthSq = dot( blended, blended );
 		normal = lengthSq > 1e-8 ? blended * inversesqrt( lengthSq ) : vec3( 0.0 );
 	}
@@ -298,6 +325,32 @@ void main()
 		}
 	}
 
+	// Spawn: a fresh start, from where the springs pull the swarm back in.
+	if( uSpawn > 0.0 )
+	{
+		// An integer hash of the particle's texel: the sine hash lines up in
+		// stripes when it fills the whole picture.
+		uint state = uint( texel.y ) * 4096u + uint( texel.x ) + uint( uSpawnSeed * 1048576.0 ) * 2654435761u;
+		vec3 random = vec3( pcg( state ), pcg( state + 0x9E3779B9u ), pcg( state + 0x3C6EF372u ) );
+		if( uSpawnFrom == 1 )
+		{
+			// Center: a burst out of the middle.
+			vec3 direction = normalize( random * 2.0 - 1.0 + vec3( 1e-4 ) );
+			position = direction * 0.05;
+			velocity = direction * ( 3.0 + 4.0 * hash( seed * 5.9 + uSpawnSeed ) );
+		}
+		else
+		{
+			// Scatter: all over the picture. Far: a wide cloud far behind the
+			// shape, flying in towards the camera.
+			float depth = uSpawnFrom == 0 ? mix( uDepthRange.x, uDepthRange.y, random.z ) : uDepthRange.y + 3.0 + 6.0 * random.z;
+			vec2 spread = uSpawnFrom == 0 ? vec2( 1.0 ) : vec2( 1.6 );
+			vec2 xy = ( random.xy * 2.0 - 1.0 ) * uFrustum * depth * spread;
+			position = transpose( uViewRotation ) * ( vec3( xy, -depth ) - uViewTranslation );
+			velocity = vec3( 0.0 );
+		}
+	}
+
 	oPosition = vec4( position, seed );
 	oVelocity = vec4( velocity, 0.0 );
 }
@@ -391,9 +444,14 @@ uniform float uTwinkle;
 uniform float uDepthFade;
 uniform float uDistance; // camera distance to the centre of the shape
 // Light, in the shape's own space.
-uniform sampler2D uTargets;// where each particle belongs, to tell surface from free flight
-uniform sampler2D uOtherTargets;// the shape it is coming from or blending with
-uniform sampler2D uOtherNormals;
+// Both meshes, to tell surface from free flight. uNormals is Mesh 1's.
+uniform sampler2D uTargets;
+uniform sampler2D uMorphTargets;
+uniform sampler2D uMorphNormals;
+uniform float uMorph;     // 0 = Mesh 1, 1 = Mesh 2
+uniform float uSplit;
+uniform vec3 uAnchor;     // each mesh's point that sits at the centre
+uniform vec3 uMorphAnchor;
 uniform vec3 uLightColor;
 uniform float uSelfGlow;// the particles' own light, in their colour
 uniform float uKeyLight;
@@ -430,14 +488,33 @@ float hash( float n )
 	return fract( sin( n ) * 43758.5453123 );
 }
 
+// As in the update shader: how far this particle has gone over to Mesh 2.
+float MorphWeight( float seed )
+{
+	float threshold = 0.02 + 0.96 * hash( seed * 41.3 );
+	float switched = smoothstep( threshold - 0.02, threshold + 0.02, uMorph );
+	return mix( uMorph, switched, uSplit );
+}
+
+// A particle's spot on a mesh, moved by the mesh's anchor, and the surface
+// normal there; point clouds point away from the mesh's centre.
+vec3 MeshSpot( sampler2D targets, sampler2D normals, vec3 anchor, ivec2 texel, out vec3 normal )
+{
+	vec3 spot = texelFetch( targets, texel, 0 ).xyz;
+	normal = texelFetch( normals, texel, 0 ).xyz;
+	if( dot( normal, normal ) == 0.0 )
+		normal = spot / max( length( spot ), 1e-4 );
+	return spot - anchor;
+}
+
 // Moves a simulated position by the beat effects. Head and tail of a streak
 // get the same offset, so the effects themselves don't smear.
 vec3 BeatOffset( vec3 position, ivec2 texel, float seed, out float waveGlow )
 {
 	if( uBeat > 0.001 )
 	{
-		vec3 normal = texelFetch( uNormals, texel, 0 ).xyz;
-		vec3 outward = dot( normal, normal ) > 0.0 ? normal : position / max( length( position ), 1e-4 );
+		vec3 normal = mix( texelFetch( uNormals, texel, 0 ).xyz, texelFetch( uMorphNormals, texel, 0 ).xyz, MorphWeight( seed ) );
+		vec3 outward = dot( normal, normal ) > 1e-8 ? normalize( normal ) : position / max( length( position ), 1e-4 );
 		// Pulse: the whole shape swells along its surface.
 		vec3 offset = outward * ( uPulse * uBeat );
 		// Jitter: every particle twitches to its own side.
@@ -560,21 +637,21 @@ void main()
 	vec3 ownColor = color * uSelfGlow;
 	if( uKeyLight > 0.0 || uRim > 0.0 || uPointLight > 0.0 || uCenterLight > 0.0 )
 	{
-		// Near either shape counts as on the surface, with that shape's
-		// normal, so the light hands over smoothly when the target changes.
-		vec3 target = texelFetch( uTargets, texel, 0 ).xyz;
-		vec3 normal = texelFetch( uNormals, texel, 0 ).xyz;
-		vec3 otherTarget = texelFetch( uOtherTargets, texel, 0 ).xyz;
-		vec3 otherNormal = texelFetch( uOtherNormals, texel, 0 ).xyz;
-		if( dot( normal, normal ) == 0.0 )
-			normal = target / max( length( target ), 1e-4 );
-		if( dot( otherNormal, otherNormal ) == 0.0 )
-			otherNormal = otherTarget / max( length( otherTarget ), 1e-4 );
-		float atTarget = 1.0 - smoothstep( 0.3, 0.8, distance( state.xyz, target ) );
-		float atOther = 1.0 - smoothstep( 0.3, 0.8, distance( state.xyz, otherTarget ) );
-		vec3 blendedNormal = normal * ( atTarget + 1e-3 ) + otherNormal * atOther;
-		vec3 n = normalize( blendedNormal + vec3( 0.0, 1e-6, 0.0 ) );
-		float onSurface = max( atTarget, atOther );
+		// On the surface means near the spot the Morph fader blends to, or
+		// still near the mesh the fader is moving away from, so the light
+		// hands over smoothly when the fader moves.
+		vec3 normal1, normal2;
+		vec3 spot1 = MeshSpot( uTargets, uNormals, uAnchor, texel, normal1 );
+		vec3 spot2 = MeshSpot( uMorphTargets, uMorphNormals, uMorphAnchor, texel, normal2 );
+		float weight = MorphWeight( seed );
+		vec3 goal = mix( spot1, spot2, weight );
+		vec3 goalNormal = mix( normal1, normal2, weight );
+		vec3 behind = weight < 0.5 ? spot2 : spot1;
+		vec3 behindNormal = weight < 0.5 ? normal2 : normal1;
+		float atGoal = 1.0 - smoothstep( 0.3, 0.8, distance( state.xyz, goal ) );
+		float atBehind = ( 1.0 - smoothstep( 0.3, 0.8, distance( state.xyz, behind ) ) ) * ( 1.0 - atGoal );
+		vec3 n = normalize( goalNormal * ( atGoal + 1e-3 ) + behindNormal * atBehind + vec3( 0.0, 1e-6, 0.0 ) );
+		float onSurface = max( atGoal, atBehind );
 		vec3 tint = uLightColor * ( 0.35 + 0.65 * color );
 		vec3 lit = vec3( 0.0 );
 
