@@ -48,7 +48,8 @@ HD and beyond.
 ### Presets
 
 SwarmMorph comes with presets: BPM Box, BPM Time Bomb, Borg Cube, Cyber
-Ocean, Grunge Donut, Jealous Jellyfish, Mystic Ball and Stormy Crysis. The
+Ocean, Grunge Donut, Jealous Jellyfish, Mystic Ball, Sea Gras and Stormy
+Crysis. The
 first time you use the plugin, it copies them into
 `Documents/Resolume Arena/Presets/Sources/SwarmMorph` (and the Avenue folder,
 if you have one); restart Resolume once if the preset menu doesn't show them
