@@ -154,7 +154,7 @@ void Usage()
 		"  --frames N           frames to render (default: 240)\n"
 		"  --fps N              simulated frame rate (default: 60)\n"
 		"  --every N            write every Nth frame (default: 30; 0 = only the last)\n"
-		"  --mesh SLOT FILE     load an OBJ into mesh slot 1..8\n"
+		"  --mesh SLOT FILE     load an OBJ or Alembic file into Mesh 1 or 2\n"
 		"  --set NAME=VALUE     set a parameter before the first frame\n"
 		"  --at FRAME NAME=VALUE  set a parameter at a frame (repeatable)\n"
 		"  --load-wait SEC      real time to wait for mesh loading (default: 2)\n"

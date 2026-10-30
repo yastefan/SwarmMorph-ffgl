@@ -57,6 +57,8 @@ endif()
 add_library(swarmmorph-mesh STATIC
     src/MeshSampler.h
     src/MeshSampler.cpp
+    src/Shapes.h
+    src/Shapes.cpp
     src/AlembicLoader.h
     src/AlembicLoader.cpp
 )

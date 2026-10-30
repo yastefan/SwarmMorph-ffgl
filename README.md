@@ -2,9 +2,9 @@
 
 **A particle swarm for Resolume that morphs between your 3D models.**
 
-Load up to eight 3D models (`.obj` or Alembic `.abc`), and SwarmMorph turns them into a cloud of up
-to one million glowing particles. Switch the target mesh and the whole swarm
-takes off, swirls through the air and lands on the new shape. Animated meshes
+Load two 3D models (`.obj` or Alembic `.abc`), and SwarmMorph turns them into a cloud of up
+to one million glowing particles. Move the **Morph** fader and the whole swarm
+takes off, swirls through the air and lands on the other shape. Animated meshes
 from Blender work too: the particles ride along with the moving surface.
 
 SwarmMorph is a native FFGL source plugin for **Resolume Arena and Avenue** on
@@ -52,12 +52,13 @@ decade has. Macs with Intel or Apple Silicon are both supported.
 ## Your first swarm
 
 1. Drag **SwarmMorph** from the Sources tab onto an empty clip and trigger it.
-   You'll see a sphere of particles: that's the placeholder until you load a
-   model.
-2. In the clip's parameters, open the **Meshes** group and choose an `.obj`
-   or `.abc` file for **Mesh 1**, another one for **Mesh 2**, and so on.
-3. Change **Target** to 2, and watch the swarm fly from the first model to
-   the second.
+   You'll see a sphere of particles.
+2. Push **Morph** (in the **Meshes** group) to 100 %, and watch the swarm
+   fly from the sphere to a torus. Pick other built-in forms under **Shape**
+   in the **Mesh 1** and **Mesh 2** groups.
+3. For your own models, choose an `.obj` or `.abc` file under **Mesh 1** or
+   **Mesh 2**; it replaces that group's shape. Clear the file to get the
+   shape back.
 4. Now play: raise **Turbulence** for wilder flights, lower **Attraction** for
    slow, dreamy transitions, push **Wind X** for a gust, raise **Burst** and
    hit **Hit** for an explosion.
@@ -72,16 +73,21 @@ for the command).
 
 ## Ideas for live shows
 
-- **Morph on the beat:** use Resolume's BPM sync to animate **Target**, or
-  map **Next** to a MIDI pad to step through your loaded models one by one.
-- **Morph on a fader:** load two models, set **Target** to the first and
-  **Morph To** to the second, and map **Morph** to a MIDI fader or your
-  crossfader. The swarm follows the fader with all its swirl and buzz; stop
-  halfway for a cloud that's neither one nor the other.
+- **Morph on a fader:** map **Morph** to a MIDI fader or your crossfader.
+  The swarm follows the fader with all its swirl and buzz; stop halfway for
+  a cloud that's neither one nor the other. For a morph on the beat, give
+  Morph a BPM-synced animation in Resolume.
+- **Off-centre:** **Anchor X/Y/Z** picks the point of each mesh that sits at
+  the centre. Shift Mesh 2's anchor and the swarm travels across the
+  picture while it morphs; with **Spin**, the shape orbits round the anchor
+  instead of turning on the spot.
+- **Two at once:** with **Split** at 100 % and Morph at 50 %, both meshes
+  stand in the picture, each with half the particles. Give them different
+  anchors to put them side by side; moving Morph then lets the swarm
+  trickle over from one shape to the other.
 - **On the beat:** the **Beat** effects follow Resolume's BPM by themselves.
   Leave **Beat Rate** on 1 Beat, raise **Pulse** or **Shockwave** a little,
-  and the shape breathes with the music. Add **Auto Next** on 4 bars and the
-  swarm changes models on the phrase. Set Beat Rate to Off and map **Hit**
+  and the shape breathes with the music. Set Beat Rate to Off and map **Hit**
   to a pad or an audio trigger to play them by hand.
 - **Hit the kick:** set **Beat Rate** to Off, **Burst** to 100 % and map
   **Hit** to a pad or an audio-reactive trigger for an explosion that
@@ -112,6 +118,9 @@ for the command).
   surface; free-flying ones keep their Self Glow.
 - **Lantern:** **Self Glow** near 0 and **Center Light** up: the shape glows
   from inside, and particles blown out of it fade into the dark.
+- **Fly-in on clip change:** turn on **Spawn On Start** and pick a
+  **Spawn From**. Every time you switch to the clip, the swarm scatters and
+  swarms into the shape; with **Attraction** low it takes its time.
 - **Fader weather:** put **Wind X/Y/Z**, **Vortex** and **Explode** on faders.
   All of them rest at the centre, so the shape stays calm until you move them.
 - **Blown away:** set some **Wind X**, then raise **Blow Away**. Particles
@@ -141,18 +150,24 @@ The parameters appear in Resolume in this order:
 
 | Group     | Parameter         | What it does |
 |-----------|-------------------|--------------|
-| Meshes    | Mesh 1–8          | `.obj` or `.abc` file per slot |
+| Meshes    | Morph             | Slide the swarm from Mesh 1 (0) to Mesh 2 (1), like a crossfader |
+|           | Split             | 0: every particle glides together, so halfway the swarm is a cloud between the meshes. 1: each particle switches over at its own point of the fader, so halfway half the swarm sits on each mesh |
 |           | Normalize         | Centre each mesh and scale it to the unit sphere |
 |           | OBJ Sequences     | Detect numbered sequences; turn off to load such files as single meshes |
-|           | Target            | Slot the swarm flies to (1–8). Empty or failed slots are ignored. |
-|           | Next              | Jump to the next loaded slot (map it to a MIDI pad or the BPM) |
-|           | Morph             | Slide the swarm from Target (0) to Morph To (1) by hand, like a crossfader |
-|           | Morph To          | Slot that Morph blends towards (1–8) |
+| Mesh 1    | Shape 1           | Built-in form: Sphere, Cube, Torus, Knot, Cylinder, Cone, Helix, Wave or Plane |
+|           | Mesh 1            | `.obj` or `.abc` file; replaces the shape while it is set |
+|           | Anchor 1 X/Y/Z    | The point of the mesh that sits at the centre, where Spin, Rotate and the camera turn around; ±2 units, centre = the mesh's own centre. Raising X moves the mesh left |
+| Mesh 2    | Shape 2           | Built-in form that Morph blends towards (Torus at first) |
+|           | Mesh 2            | `.obj` or `.abc` file; replaces the shape while it is set |
+|           | Anchor 2 X/Y/Z    | The same for Mesh 2 |
 | Morph     | Speed             | Time scale of the particles: 1× in the middle, 0 freezes them, 2× doubles the pace. Beat, animation and camera keep real time |
 | Morph     | Attraction        | Spring strength: how fast particles reach the new shape, and how firmly they hold it |
 |           | Damping           | Low values overshoot and wobble, high values glide in |
 |           | Chaos             | Per-particle variation of the attraction, so the swarm arrives in waves |
 |           | Turbulence        | Swirl while travelling; fades out as particles arrive |
+|           | Spawn From        | Where Spawn throws the particles: **Scatter** (all over the picture), **Center** (a burst out of the middle) or **Far** (a wide cloud far behind the shape) |
+|           | Spawn On Start    | Spawn every time the clip starts playing, so switching to the clip lets the swarm fly in |
+|           | Spawn             | Spawn now (map it to a pad) |
 | Swarm     | Surface Flow      | Particles stream along the surface of the shape, like a swarm crawling over it |
 |           | Hover             | Thickness of the loose particle layer floating above and below the surface |
 |           | Flow Scale        | Size of the swirls and streams (also of Turbulence) |
@@ -174,10 +189,9 @@ The parameters appear in Resolume in this order:
 |           | Jitter            | Every particle twitches to its own side |
 |           | Flash             | Brightness spike |
 |           | Spin Step         | The camera turns a step (up to 90°) and springs into place |
-|           | Auto Next         | Move to the next loaded model every 1, 2, 4 or 8 bars, on the downbeat |
 | Animation | Anim Speed        | Playback speed of animations, 0–3× (1× = the file's own frame rate; 24 fps for OBJ sequences) |
 |           | Ping Pong         | Play forwards and backwards instead of looping |
-|           | Restart On Switch | Start the sequence from its first frame when it becomes the target |
+|           | Restart On Switch | Start the sequence from its first frame when it comes into play (Mesh 1 on load, Mesh 2 when Morph leaves 0) |
 | Look      | Particles         | Particle count, 10k – 1M |
 |           | Point Size        | In pixels at 1080p and the default distance; points grow more slowly than the shape when the camera comes close, so close-ups stay fine-grained |
 |           | Softness          | From crisp dots to soft glowing blobs; the total light stays the same |
@@ -199,7 +213,7 @@ The parameters appear in Resolume in this order:
 |           | Point Light       | A light circling the shape that lights a pool of particles near it, even ones in flight |
 |           | Light Orbit       | How fast the point light circles, centre = still; it starts on the key light's side |
 |           | Center Light      | A lamp inside the shape, as if in fog: particles near the centre light up, whichever way they face |
-| Camera    | Spin              | Continuous rotation, centre = still |
+| Camera    | Spin              | Continuous rotation, centre = still (the default) |
 |           | Rotate X/Y, Zoom  | Camera orientation and distance |
 |           | Path              | Camera move: Off, Orbit, Wave Orbit, Spiral, Fly Through, Close Pass, Crane or Vertigo |
 |           | Path Position     | Where on the path the camera is (0–100 %); 0 and 100 % are the same shot, so loops are seamless |
@@ -251,7 +265,7 @@ into memory completely, up to about 1 GB of vertex data.
 ### OBJ sequences
 
 Pick any file of a numbered sequence (`walk_0001.obj`, `walk_0002.obj`, ...)
-in a mesh slot and SwarmMorph loads the whole sequence. A sequence needs at
+for Mesh 1 or 2 and SwarmMorph loads the whole sequence. A sequence needs at
 least three digits before `.obj` and two files with the same prefix in the
 same folder. In Blender: **File → Export → Wavefront (.obj)**, enable
 **Animation** and set the frame range. OBJ files carry no frame rate, so
@@ -342,7 +356,7 @@ cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build-debug
 ./build-debug/swarmmorph-harness --plugin build-debug/SwarmMorph.bundle --out renders \
     --mesh 1 examples/meshes/torus.obj --mesh 2 examples/meshes/knot.obj \
-    --frames 360 --every 30 --at 180 Target=2
+    --frames 360 --every 30 --at 180 Morph=1
 ```
 
 In Debug builds the FFGL SDK asserts whenever the plugin leaves the GL context

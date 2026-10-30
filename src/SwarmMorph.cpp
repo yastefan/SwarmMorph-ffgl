@@ -10,6 +10,7 @@
 #include <thread>
 #include "AlembicLoader.h"
 #include "CameraPaths.h"
+#include "Shapes.h"
 #include "MathUtil.h"
 #include "MeshSampler.h"
 #include "Shaders.h"
@@ -35,21 +36,30 @@ namespace
 // section whenever the group changes.
 enum ParamID
 {
-	PID_MESH_FIRST = 0,
-	PID_MESH_LAST  = PID_MESH_FIRST + SwarmMorph::kNumSlots - 1,
+	PID_MORPH = 0,
+	PID_SPLIT,
 	PID_NORMALIZE,
 	PID_SEQUENCES,
 
-	PID_TARGET,
-	PID_NEXT,
-	PID_MORPH,
-	PID_MORPH_TO,
+	PID_SHAPE1,
+	PID_MESH1,// a file here replaces the shape
+	PID_ANCHOR1_X,// X, Y and Z in a row; the shader moves the mesh by -anchor
+	PID_ANCHOR1_Y,
+	PID_ANCHOR1_Z,
+	PID_SHAPE2,
+	PID_MESH2,
+	PID_ANCHOR2_X,
+	PID_ANCHOR2_Y,
+	PID_ANCHOR2_Z,
 
 	PID_SPEED,
 	PID_ATTRACTION,
 	PID_DAMPING,
 	PID_CHAOS,
 	PID_TURBULENCE,
+	PID_SPAWN_FROM,
+	PID_SPAWN_ON_START,
+	PID_SPAWN,
 
 	PID_SURFACE_FLOW,
 	PID_HOVER,
@@ -76,7 +86,6 @@ enum ParamID
 	PID_JITTER,
 	PID_FLASH,
 	PID_SPIN_STEP,
-	PID_AUTO_NEXT,
 
 	PID_ANIM_SPEED,
 	PID_PING_PONG,
@@ -209,7 +218,6 @@ float RadialValue( float v ) { return CentredForce( v, 6.0f ); }
 float OrbitValue( float v ) { return CentredForce( v, 0.5f ); }// revolutions per second
 // Beat Rate and Auto Next options, as intervals in bars (4/4).
 const double kBeatIntervals[]  = { 0.0, 0.125, 0.25, 0.5, 1.0, 2.0 };
-const double kAutoNextBars[]   = { 0.0, 1.0, 2.0, 4.0, 8.0 };
 float DecaySeconds( float v ) { return 0.06f + 0.9f * v * v; }
 float PulseValue( float v ) { return 0.15f * v; }
 float ShockwaveValue( float v ) { return 0.4f * v; }
@@ -249,8 +257,17 @@ bool IsAlembicPath( const std::string& path )
 
 bool IsMeshParam( unsigned int index )
 {
-	return index >= PID_MESH_FIRST && index <= PID_MESH_LAST;
+	return index == PID_MESH1 || index == PID_MESH2;
 }
+
+int MeshSlot( unsigned int index )
+{
+	return index == PID_MESH2 ? 1 : 0;
+}
+
+// Anchor: the point of the mesh that sits at the centre, where Spin, Rotate
+// and the camera turn around. Centred slider = the mesh's own centre.
+float AnchorValue( float v ) { return CentredForce( v, 2.0f ); }
 }// namespace
 
 SwarmMorph::SwarmMorph()
@@ -260,27 +277,38 @@ SwarmMorph::SwarmMorph()
 	SetMinInputs( 0 );
 	SetMaxInputs( 0 );
 
-	for( int i = 0; i < kNumSlots; ++i )
-	{
-		std::string name = "Mesh " + std::to_string( i + 1 );
-		std::vector< std::string > extensions{ "obj" };
-		if( swarm::AlembicSupported() )
-			extensions.push_back( "abc" );
-		SetFileParamInfo( PID_MESH_FIRST + i, name.c_str(), extensions, "" );
-		SetParamGroup( PID_MESH_FIRST + i, "Meshes" );
-	}
+	// Morph crossfades the swarm from Mesh 1 to Mesh 2.
+	SetParamInfof( PID_MORPH, "Morph", FF_TYPE_STANDARD );
+	// Split: instead of every particle gliding to a point between the meshes,
+	// each one switches over at its own point of the fader, so halfway the
+	// swarm is split across both shapes.
+	SetParamInfof( PID_SPLIT, "Split", FF_TYPE_STANDARD );
 	SetParamInfo( PID_NORMALIZE, "Normalize", FF_TYPE_BOOLEAN, normalizeMeshes );
 	SetParamInfo( PID_SEQUENCES, "OBJ Sequences", FF_TYPE_BOOLEAN, detectSequences );
-	SetParamGroup( PID_NORMALIZE, "Meshes" );
-	SetParamGroup( PID_SEQUENCES, "Meshes" );
+	for( unsigned int id = PID_MORPH; id <= PID_SEQUENCES; ++id )
+		SetParamGroup( id, "Meshes" );
 
-	SetParamInfo( PID_TARGET, "Target", FF_TYPE_INTEGER, 1.0f );
-	SetParamRange( PID_TARGET, 1.0f, static_cast< float >( kNumSlots ) );
-	SetParamInfo( PID_NEXT, "Next", FF_TYPE_EVENT, false );
-	// A fader-driven morph: Morph slides the swarm's goal from Target to Morph To.
-	SetParamInfof( PID_MORPH, "Morph", FF_TYPE_STANDARD );
-	SetParamInfo( PID_MORPH_TO, "Morph To", FF_TYPE_INTEGER, 2.0f );
-	SetParamRange( PID_MORPH_TO, 1.0f, static_cast< float >( kNumSlots ) );
+	// Each mesh in its own collapsible group: a built-in shape, a file that
+	// replaces it, and the anchor.
+	std::vector< std::string > extensions{ "obj" };
+	if( swarm::AlembicSupported() )
+		extensions.push_back( "abc" );
+	const unsigned int meshParams[ kNumSlots ] = { PID_MESH1, PID_MESH2 };
+	for( int i = 0; i < kNumSlots; ++i )
+	{
+		std::string mesh = "Mesh " + std::to_string( i + 1 );
+		std::string anchorName = "Anchor " + std::to_string( i + 1 );
+		std::string shapeName  = "Shape " + std::to_string( i + 1 );
+		SetOptionParamInfo( meshParams[ i ] - 1, shapeName.c_str(), swarm::ShapeCount(), static_cast< float >( shape[ i ] ) );
+		for( int s = 0; s < swarm::ShapeCount(); ++s )
+			SetParamElementInfo( meshParams[ i ] - 1, s, swarm::ShapeName( s ), static_cast< float >( s ) );
+		SetFileParamInfo( meshParams[ i ], mesh.c_str(), extensions, "" );
+		const char* axes[] = { " X", " Y", " Z" };
+		for( unsigned int axis = 0; axis < 3; ++axis )
+			SetParamInfof( meshParams[ i ] + 1 + axis, ( anchorName + axes[ axis ] ).c_str(), FF_TYPE_STANDARD );
+		for( unsigned int id = meshParams[ i ] - 1; id <= meshParams[ i ] + 3; ++id )
+			SetParamGroup( id, mesh );
+	}
 
 	// How the swarm travels from one mesh to the next.
 	SetParamInfof( PID_SPEED, "Speed", FF_TYPE_STANDARD );
@@ -288,7 +316,15 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_DAMPING, "Damping", FF_TYPE_STANDARD );
 	SetParamInfof( PID_CHAOS, "Chaos", FF_TYPE_STANDARD );
 	SetParamInfof( PID_TURBULENCE, "Turbulence", FF_TYPE_STANDARD );
-	for( unsigned int id = PID_SPEED; id <= PID_TURBULENCE; ++id )
+	// Spawn throws the particles to a new start, from where they swarm into
+	// the shape: by hand, or every time the clip starts playing.
+	SetOptionParamInfo( PID_SPAWN_FROM, "Spawn From", 3, static_cast< float >( spawnFrom ) );
+	SetParamElementInfo( PID_SPAWN_FROM, 0, "Scatter", 0.0f );
+	SetParamElementInfo( PID_SPAWN_FROM, 1, "Center", 1.0f );
+	SetParamElementInfo( PID_SPAWN_FROM, 2, "Far", 2.0f );
+	SetParamInfo( PID_SPAWN_ON_START, "Spawn On Start", FF_TYPE_BOOLEAN, spawnOnStart );
+	SetParamInfo( PID_SPAWN, "Spawn", FF_TYPE_EVENT, false );
+	for( unsigned int id = PID_SPEED; id <= PID_SPAWN; ++id )
 		SetParamGroup( id, "Morph" );
 
 	// How it moves once it has arrived.
@@ -325,11 +361,7 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_JITTER, "Jitter", FF_TYPE_STANDARD );
 	SetParamInfof( PID_FLASH, "Flash", FF_TYPE_STANDARD );
 	SetParamInfof( PID_SPIN_STEP, "Spin Step", FF_TYPE_STANDARD );
-	SetOptionParamInfo( PID_AUTO_NEXT, "Auto Next", 5, static_cast< float >( autoNext ) );
-	const char* bars[] = { "Off", "1 Bar", "2 Bars", "4 Bars", "8 Bars" };
-	for( int i = 0; i < 5; ++i )
-		SetParamElementInfo( PID_AUTO_NEXT, i, bars[ i ], static_cast< float >( i ) );
-	for( unsigned int id = PID_BEAT_RATE; id <= PID_AUTO_NEXT; ++id )
+	for( unsigned int id = PID_BEAT_RATE; id <= PID_SPIN_STEP; ++id )
 		SetParamGroup( id, "Beat" );
 
 	SetParamInfof( PID_ANIM_SPEED, "Anim Speed", FF_TYPE_STANDARD );
@@ -511,7 +543,7 @@ bool SwarmMorph::CreateGLResources()
 	for( int i = 0; i < kNumSlots; ++i )
 	{
 		slots[ i ].loaded = false;
-		if( !slots[ i ].path.empty() && !slots[ i ].pending )
+		if( !slots[ i ].pending )
 			StartLoad( i, slots[ i ].path );
 	}
 	GLenum error = glGetError();
@@ -570,14 +602,10 @@ void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
 	Slot& slot   = slots[ slotIndex ];
 	slot.path    = path;
 	slot.pending = nullptr;
-	if( path.empty() )
-	{
-		slot.loaded = false;
-		return;
-	}
 
 	auto job       = std::make_shared< LoadJob >();
 	job->path      = path;
+	job->shape     = shape[ slotIndex ];
 	slot.pending   = job;
 	bool normalize       = normalizeMeshes;
 	bool detectSequences = this->detectSequences;
@@ -587,7 +615,13 @@ void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
 		{
 			swarm::MeshSequence sequence;
 			bool loaded = false;
-			if( IsAlembicPath( job->path ) )
+			if( job->path.empty() )
+			{
+				sequence.firstFrame = swarm::MakeShape( job->shape );
+				sequence.frames.push_back( sequence.firstFrame.positions );
+				loaded = true;
+			}
+			else if( IsAlembicPath( job->path ) )
 			{
 				loaded = swarm::LoadAlembic( job->path, sequence, job->error, job->warning );
 			}
@@ -603,7 +637,8 @@ void SwarmMorph::StartLoad( int slotIndex, const std::string& path )
 				for( const std::vector< float >& frame : sequence.frames )
 					allFrames.push_back( &frame );
 				swarm::Normalization normalization = swarm::ComputeNormalization( allFrames );
-				if( normalize )
+				// Built-in shapes are made to size already.
+				if( normalize && !job->path.empty() )
 					for( std::vector< float >& frame : sequence.frames )
 						normalization.Apply( frame );
 
@@ -763,31 +798,13 @@ void SwarmMorph::AdvanceAnimation( int slotIndex, float deltaTime )
 	slot.evaluatedRows = rows;
 }
 
-void SwarmMorph::SelectNextLoadedSlot()
-{
-	for( int step = 1; step <= kNumSlots; ++step )
-	{
-		int candidate = ( targetSlot + step ) % kNumSlots;
-		if( slots[ candidate ].loaded || slots[ candidate ].pending )
-		{
-			targetSlot = candidate;
-			return;
-		}
-	}
-}
-
 void SwarmMorph::CurrentTarget( GLuint& targets, GLuint& normals )
 {
 	// An empty or still-loading slot keeps the swarm heading where it was.
 	int previous = activeSlot;
-	if( slots[ targetSlot ].loaded )
-		activeSlot = targetSlot;
-	if( activeSlot >= 0 && !slots[ activeSlot ].loaded )
-		activeSlot = -1;
+	activeSlot   = slots[ 0 ].loaded ? 0 : -1;
 	if( activeSlot != previous && activeSlot >= 0 && restartOnSwitch )
 		slots[ activeSlot ].playhead = 0.0;
-	if( activeSlot != previous )
-		leftSlot = previous;
 	SlotTextures( activeSlot, targets, normals );
 }
 
@@ -808,11 +825,9 @@ void SwarmMorph::SlotTextures( int slot, GLuint& targets, GLuint& normals ) cons
 float SwarmMorph::MorphTarget( GLuint& targets, GLuint& normals )
 {
 	int previous = morphActiveSlot;
-	morphActiveSlot = morph > 0.0f && slots[ morphSlot ].loaded && morphSlot != activeSlot ? morphSlot : -1;
+	morphActiveSlot = morph > 0.0f && slots[ 1 ].loaded ? 1 : -1;
 	if( morphActiveSlot != previous && morphActiveSlot >= 0 && restartOnSwitch )
 		slots[ morphActiveSlot ].playhead = 0.0;
-	if( morphActiveSlot < 0 && previous >= 0 )
-		leftSlot = previous;
 	if( morphActiveSlot < 0 )
 		return 0.0f;
 	targets = slots[ morphActiveSlot ].texture;
@@ -838,8 +853,6 @@ void SwarmMorph::UpdateBeat( float deltaTime )
 			};
 			if( crossed( kBeatIntervals[ beatRate ] ) )
 				kick = true;
-			if( crossed( kAutoNextBars[ autoNext ] ) )
-				SelectNextLoadedSlot();
 		}
 		lastBarPhase    = barPhase;
 		lastBarPosition = position;
@@ -889,6 +902,11 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	float deltaTime = 0.0f;
 	if( lastTime >= 0.0 )
 		deltaTime = static_cast< float >( ( hostTime - lastTime ) / 1000.0 );
+	// A clip that isn't playing gets no frames, so the clip (re)starting shows
+	// up as the first frame, a gap, or time running backwards.
+	bool started = lastTime < 0.0 || deltaTime > 0.3f || deltaTime < -0.001f;
+	if( started && spawnOnStart )
+		spawnPending = true;
 	lastTime  = hostTime;
 	// Big jumps (clip retriggered, host stalled) would make the springs explode.
 	if( !std::isfinite( deltaTime ) )
@@ -914,20 +932,10 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	AdvanceAnimation( activeSlot, deltaTime );
 	AdvanceAnimation( morphActiveSlot, deltaTime );
 	Simulate( swarmDelta, targets, normals, morphTargets, morphNormals, morphAmount );
-	// The light looks at two shapes: the one in the lead and the other side
-	// of a morph, or else the shape the swarm just left.
-	GLuint otherTargets = targets, otherNormals = normals;
-	if( morphAmount > 0.0f )
-	{
-		otherTargets = morphTargets;
-		otherNormals = morphNormals;
-	}
-	else if( leftSlot >= -1 && leftSlot != activeSlot )
-		SlotTextures( leftSlot, otherTargets, otherNormals );
-	if( morphAmount > 0.5f )
-		Render( morphTargets, morphNormals, targets, normals );
-	else
-		Render( targets, normals, otherTargets, otherNormals );
+	GLuint mesh2Targets = targets, mesh2Normals = normals;
+	if( slots[ 1 ].loaded )
+		SlotTextures( 1, mesh2Targets, mesh2Normals );
+	Render( targets, normals, mesh2Targets, mesh2Normals, morphAmount );
 	return FF_SUCCESS;
 }
 
@@ -976,7 +984,16 @@ void SwarmMorph::Simulate( float deltaTime, GLuint targets, GLuint normals, GLui
 	updateShader.Set( "uMorphTargets", 4 );
 	updateShader.Set( "uMorphNormals", 5 );
 	updateShader.Set( "uMorph", morphAmount );
+	SetAnchorUniforms( updateShader );
 	updateShader.Set( "uBeatKick", beatKick ? 1.0f : 0.0f );
+	updateShader.Set( "uSpawn", spawnPending ? 1.0f : 0.0f );
+	updateShader.Set( "uSpawnFrom", spawnFrom );
+	updateShader.Set( "uSpawnSeed", spawnSeed );
+	if( spawnPending )
+	{
+		spawnPending = false;
+		spawnSeed    = std::fmod( spawnSeed + 0.618034f, 1.0f );
+	}
 	updateShader.Set( "uBeatSeed", beatSeed );
 	updateShader.Set( "uBurst", BurstValue( burst ) );
 	updateShader.Set( "uNoiseTime", noiseTime );
@@ -1025,7 +1042,7 @@ SwarmMorph::Camera SwarmMorph::CurrentCamera() const
 	return camera;
 }
 
-void SwarmMorph::Render( GLuint targets, GLuint normals, GLuint otherTargets, GLuint otherNormals )
+void SwarmMorph::Render( GLuint targets, GLuint normals, GLuint mesh2Targets, GLuint mesh2Normals, float morphAmount )
 {
 	float height = static_cast< float >( std::max< GLuint >( currentViewport.height, 1 ) );
 
@@ -1071,8 +1088,10 @@ void SwarmMorph::Render( GLuint targets, GLuint normals, GLuint otherTargets, GL
 	shader.Set( "uVelocities", 1 );
 	shader.Set( "uNormals", 2 );
 	shader.Set( "uTargets", 3 );
-	shader.Set( "uOtherTargets", 4 );
-	shader.Set( "uOtherNormals", 5 );
+	shader.Set( "uMorphTargets", 4 );
+	shader.Set( "uMorphNormals", 5 );
+	shader.Set( "uMorph", morphAmount );
+	SetAnchorUniforms( shader );
 	shader.Set( "uTextureWidth", kTextureWidth );
 
 	glEnable( GL_BLEND );
@@ -1085,14 +1104,14 @@ void SwarmMorph::Render( GLuint targets, GLuint normals, GLuint otherTargets, GL
 		const swarm::Mat4& previous = hasPreviousMVP ? previousMVP : mvp;
 		glUniformMatrix4fv( shader.FindUniform( "uPreviousMVP" ), 1, GL_FALSE, previous.m );
 		shader.Set( "uViewport", static_cast< float >( currentViewport.width ), static_cast< float >( currentViewport.height ) );
-		ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals, targets, otherTargets, otherNormals,
+		ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals, targets, mesh2Targets, mesh2Normals,
 										 state[ 1 - front ].positions } );
 		ScopedVAOBinding vaoBinding( streakVAO );
 		glDrawArraysInstanced( GL_TRIANGLES, 0, 6, ParticleCount() );
 	}
 	else
 	{
-		ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals, targets, otherTargets, otherNormals } );
+		ScopedTextureUnits textures( { state[ front ].positions, state[ front ].velocities, normals, targets, mesh2Targets, mesh2Normals } );
 		ScopedVAOBinding vaoBinding( indexVAO );
 		glEnable( GL_PROGRAM_POINT_SIZE );
 		glDrawArrays( GL_POINTS, 0, ParticleCount() );
@@ -1103,6 +1122,13 @@ void SwarmMorph::Render( GLuint targets, GLuint normals, GLuint otherTargets, GL
 	glDisable( GL_BLEND );
 	previousMVP    = mvp;
 	hasPreviousMVP = true;
+}
+
+void SwarmMorph::SetAnchorUniforms( ffglex::FFGLShader& shader ) const
+{
+	shader.Set( "uSplit", split );
+	shader.Set( "uAnchor", AnchorValue( anchor[ 0 ][ 0 ] ), AnchorValue( anchor[ 0 ][ 1 ] ), AnchorValue( anchor[ 0 ][ 2 ] ) );
+	shader.Set( "uMorphAnchor", AnchorValue( anchor[ 1 ][ 0 ] ), AnchorValue( anchor[ 1 ][ 1 ] ), AnchorValue( anchor[ 1 ][ 2 ] ) );
 }
 
 void SwarmMorph::SetLightUniforms( ffglex::FFGLShader& shader, const swarm::Mat4& view ) const
@@ -1151,10 +1177,34 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 {
 	switch( index )
 	{
-	case PID_TARGET:
-		targetSlot = std::min( std::max( static_cast< int >( std::lround( value ) ) - 1, 0 ), kNumSlots - 1 );
-		break;
 	case PID_MORPH: morph = value; break;
+	case PID_SPLIT: split = value; break;
+	case PID_SPAWN_FROM: spawnFrom = std::min( std::max( static_cast< int >( std::lround( value ) ), 0 ), 2 ); break;
+	case PID_SPAWN_ON_START: spawnOnStart = value > 0.5f; break;
+	case PID_SPAWN:
+		if( value > 0.5f && !spawnPressed )
+			spawnPending = true;
+		spawnPressed = value > 0.5f;
+		break;
+	case PID_SHAPE1:
+	case PID_SHAPE2:
+	{
+		int slotIndex = index == PID_SHAPE2 ? 1 : 0;
+		int chosen    = std::min( std::max( static_cast< int >( std::lround( value ) ), 0 ), swarm::ShapeCount() - 1 );
+		if( chosen != shape[ slotIndex ] )
+		{
+			shape[ slotIndex ] = chosen;
+			if( slots[ slotIndex ].path.empty() )
+				StartLoad( slotIndex, "" );
+		}
+		break;
+	}
+	case PID_ANCHOR1_X:
+	case PID_ANCHOR1_Y:
+	case PID_ANCHOR1_Z: anchor[ 0 ][ index - PID_ANCHOR1_X ] = value; break;
+	case PID_ANCHOR2_X:
+	case PID_ANCHOR2_Y:
+	case PID_ANCHOR2_Z: anchor[ 1 ][ index - PID_ANCHOR2_X ] = value; break;
 	case PID_BEAT_RATE: beatRate = std::min( std::max( static_cast< int >( std::lround( value ) ), 0 ), 5 ); break;
 	case PID_HIT:
 		if( value > 0.5f && !hitPressed )
@@ -1168,15 +1218,6 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_JITTER: jitter = value; break;
 	case PID_FLASH: flash = value; break;
 	case PID_SPIN_STEP: spinStep = value; break;
-	case PID_AUTO_NEXT: autoNext = std::min( std::max( static_cast< int >( std::lround( value ) ), 0 ), 4 ); break;
-	case PID_MORPH_TO:
-		morphSlot = std::min( std::max( static_cast< int >( std::lround( value ) ) - 1, 0 ), kNumSlots - 1 );
-		break;
-	case PID_NEXT:
-		if( value > 0.5f && !nextPressed )
-			SelectNextLoadedSlot();
-		nextPressed = value > 0.5f;
-		break;
 	case PID_NORMALIZE:
 		if( ( value > 0.5f ) != normalizeMeshes )
 		{
@@ -1264,9 +1305,19 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 {
 	switch( index )
 	{
-	case PID_TARGET: return static_cast< float >( targetSlot + 1 );
-	case PID_NEXT: return nextPressed ? 1.0f : 0.0f;
+	case PID_ANCHOR1_X:
+	case PID_ANCHOR1_Y:
+	case PID_ANCHOR1_Z: return anchor[ 0 ][ index - PID_ANCHOR1_X ];
+	case PID_ANCHOR2_X:
+	case PID_ANCHOR2_Y:
+	case PID_ANCHOR2_Z: return anchor[ 1 ][ index - PID_ANCHOR2_X ];
 	case PID_MORPH: return morph;
+	case PID_SPLIT: return split;
+	case PID_SPAWN_FROM: return static_cast< float >( spawnFrom );
+	case PID_SPAWN_ON_START: return spawnOnStart ? 1.0f : 0.0f;
+	case PID_SPAWN: return spawnPressed ? 1.0f : 0.0f;
+	case PID_SHAPE1: return static_cast< float >( shape[ 0 ] );
+	case PID_SHAPE2: return static_cast< float >( shape[ 1 ] );
 	case PID_BEAT_RATE: return static_cast< float >( beatRate );
 	case PID_HIT: return hitPressed ? 1.0f : 0.0f;
 	case PID_DECAY: return decay;
@@ -1276,8 +1327,6 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_JITTER: return jitter;
 	case PID_FLASH: return flash;
 	case PID_SPIN_STEP: return spinStep;
-	case PID_AUTO_NEXT: return static_cast< float >( autoNext );
-	case PID_MORPH_TO: return static_cast< float >( morphSlot + 1 );
 	case PID_NORMALIZE: return normalizeMeshes ? 1.0f : 0.0f;
 	case PID_PARTICLES: return particles;
 	case PID_SPEED: return speed;
@@ -1347,7 +1396,7 @@ FFResult SwarmMorph::SetTextParameter( unsigned int index, const char* value )
 {
 	if( !IsMeshParam( index ) )
 		return FF_FAIL;
-	int slotIndex    = static_cast< int >( index - PID_MESH_FIRST );
+	int slotIndex    = MeshSlot( index );
 	std::string path = value ? value : "";
 	if( path != slots[ slotIndex ].path )
 		StartLoad( slotIndex, path );
@@ -1358,7 +1407,7 @@ char* SwarmMorph::GetTextParameter( unsigned int index )
 {
 	if( !IsMeshParam( index ) )
 		return CFFGLPlugin::GetTextParameter( index );
-	return const_cast< char* >( slots[ index - PID_MESH_FIRST ].path.c_str() );
+	return const_cast< char* >( slots[ MeshSlot( index ) ].path.c_str() );
 }
 
 char* SwarmMorph::GetParameterDisplay( unsigned int index )
@@ -1368,6 +1417,13 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 	{
 	case PID_PARTICLES: snprintf( buffer, sizeof( buffer ), "%d", ParticleCount() ); return buffer;
 	case PID_MORPH: snprintf( buffer, sizeof( buffer ), "%.0f%%", morph * 100.0f ); return buffer;
+	case PID_SPLIT: snprintf( buffer, sizeof( buffer ), "%.0f%%", split * 100.0f ); return buffer;
+	case PID_ANCHOR1_X:
+	case PID_ANCHOR1_Y:
+	case PID_ANCHOR1_Z: snprintf( buffer, sizeof( buffer ), "%+.2f", AnchorValue( anchor[ 0 ][ index - PID_ANCHOR1_X ] ) ); return buffer;
+	case PID_ANCHOR2_X:
+	case PID_ANCHOR2_Y:
+	case PID_ANCHOR2_Z: snprintf( buffer, sizeof( buffer ), "%+.2f", AnchorValue( anchor[ 1 ][ index - PID_ANCHOR2_X ] ) ); return buffer;
 	case PID_DECAY: snprintf( buffer, sizeof( buffer ), "%.2f s", DecaySeconds( decay ) ); return buffer;
 	case PID_BURST: snprintf( buffer, sizeof( buffer ), "%.0f%%", BurstValue( burst ) * 100.0f ); return buffer;
 	case PID_SPIN_STEP: snprintf( buffer, sizeof( buffer ), "%.0f deg", SpinStepValue( spinStep ) ); return buffer;
