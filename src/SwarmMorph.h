@@ -136,6 +136,7 @@ private:
 	float morph          = 0.0f;
 	int shape[ kNumSlots ] = { 0, 2 };// Sphere and Torus until a file is chosen
 	float split          = 0.0f;// 0 = glide through the middle, 1 = each particle switches on its own
+	float scale[ kNumSlots ]       = { 0.5f, 0.5f };// 1x
 	float anchor[ kNumSlots ][ 3 ] = { { 0.5f, 0.5f, 0.5f }, { 0.5f, 0.5f, 0.5f } };// centred = no shift
 	float particles      = 0.5f;
 	float speed          = 0.5f;

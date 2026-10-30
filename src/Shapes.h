@@ -6,8 +6,9 @@ namespace swarm
 {
 // Built-in shapes for the Shape menus, so the plugin does something without
 // any files. Each is a real triangle mesh, roughly filling the unit sphere,
-// so lighting, anchors and morphing work as with a loaded OBJ.
+// so lighting, anchors and morphing work as with a loaded OBJ. The animated
+// ones come as a seamless looping sequence, like an animated file.
 int ShapeCount();
 const char* ShapeName( int shape );
-Mesh MakeShape( int shape );
+MeshSequence MakeShape( int shape );
 }// namespace swarm
