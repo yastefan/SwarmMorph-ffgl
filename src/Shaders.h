@@ -300,7 +300,24 @@ void main()
 	float nearSurface = 1.0 - smoothstep( 0.5, 1.5, distance );
 	vec3 alongSurface = field - normal * dot( field, normal );
 	float layer = potential * 2.0 + hash( seed * 7.7 ) - 0.5;
-	swirl += ( alongSurface * uSurfaceFlow + normal * layer * uHover ) * nearSurface;
+	swirl += normal * layer * uHover * nearSurface;
+	// Surface Flow: broad eddies on the surface, about the size of the shape
+	// rather than of the turbulence. The stream runs round the hills and
+	// hollows of a slowly drifting noise (normal x gradient), so it circles
+	// on the surface and never pushes off it. Taken at the particle's spot
+	// rather than where it is now, so neighbours keep moving together.
+	if( uSurfaceFlow > 0.0 && dot( normal, normal ) > 0.0 )
+	{
+		float t = uNoiseTime * 0.6;
+		vec3 spot = target * uNoiseScale * 0.35;
+		vec4 broad = noised( spot + vec3( 0.13, -0.07, 0.11 ) * t ) + 0.5 * noised( spot * 2.0 + vec3( 7.3, 2.1, -4.4 ) - vec3( 0.09, 0.15, 0.05 ) * t );
+		// Soft limit, so strong flow slides the particles along the surface
+		// without bending the shape out of form.
+		vec3 eddy = cross( normal, broad.yzw ) * uSurfaceFlow;
+		swirl += eddy / ( 1.0 + 2.5 * length( eddy ) ) * nearSurface;
+	}
+	else
+		swirl += alongSurface * uSurfaceFlow * nearSurface;// point clouds
 	// Individual buzz: mostly along the surface, a little in and out of it.
 	if( uBuzz > 0.0 )
 	{

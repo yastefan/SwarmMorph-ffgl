@@ -178,9 +178,9 @@ The parameters appear in Resolume in this order:
 |           | Spawn From        | Where Spawn throws the particles: **Scatter** (all over the picture), **Center** (a burst out of the middle) or **Far** (a wide cloud far behind the shape) |
 |           | Spawn On Start    | Spawn every time the clip starts playing, so switching to the clip lets the swarm fly in |
 |           | Spawn             | Spawn now (map it to a pad) |
-| Swarm     | Surface Flow      | Particles stream along the surface of the shape, like a swarm crawling over it |
+| Swarm     | Surface Flow      | Broad eddies swirl the particles along the surface of the shape, like a swarm crawling over it; the shape keeps its form |
 |           | Hover             | Thickness of the loose particle layer floating above and below the surface |
-|           | Flow Scale        | Size of the swirls and streams (also of Turbulence) |
+|           | Flow Scale        | Size of the swirls of Turbulence and Hover; Surface Flow's eddies are about three times larger |
 |           | Flow Speed        | How fast the swirls and streams change (0 freezes the pattern) |
 |           | Buzz              | Every particle wanders around its own spot on the surface, independently of its neighbours |
 |           | Buzz Speed        | From slow drifting to nervous flickering |
