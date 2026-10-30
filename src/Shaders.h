@@ -21,6 +21,32 @@ void main()
 }
 )";
 
+// Trails: the new frame of particles over the last trail image, faded and
+// optionally zoomed. The brighter of the two wins, as with Resolume's Trails,
+// so a shape that holds still doesn't burn out to white. Also copies the
+// result to the host with uFade = 0.
+static const char kTrailFS[] = R"(#version 410 core
+uniform sampler2D uCurrent;
+uniform sampler2D uPrevious;
+uniform vec2 uOrigin;// the viewport's corner and size, in pixels
+uniform vec2 uSize;
+uniform float uFade; // what is left of the last image; 0 = none
+uniform float uZoom; // how much bigger the last image is drawn
+out vec4 fragColor;
+void main()
+{
+	vec2 uv = ( gl_FragCoord.xy - uOrigin ) / uSize;
+	vec4 now = texture( uCurrent, uv );
+	vec2 from = 0.5 + ( uv - 0.5 ) / uZoom;
+	vec4 before = vec4( 0.0 );
+	if( uFade > 0.0 && all( greaterThanEqual( from, vec2( 0.0 ) ) ) && all( lessThanEqual( from, vec2( 1.0 ) ) ) )
+		// The small step down clears the last faint haze, which would
+		// otherwise linger for a long time.
+		before = max( texture( uPrevious, from ) * uFade - 0.002, 0.0 );
+	fragColor = max( now, before );
+}
+)";
+
 // Each particle is pulled towards its sample point on the current target mesh
 // by a damped spring. A curl-noise flow field bends its path: strong and fully
 // 3D while the particle travels; once it has arrived, the field is projected
@@ -457,15 +483,15 @@ uniform vec3 uAnchor;     // each mesh's point that sits at the centre
 uniform vec3 uMorphAnchor;
 uniform float uScale;
 uniform float uMorphScale;
-uniform vec3 uLightColor;
 uniform float uSelfGlow;// the particles' own light, in their colour
 uniform float uKeyLight;
+uniform vec3 uKeyColor;
 uniform vec3 uLightDirection;// towards the key light
 uniform float uRim;
+uniform vec3 uRimColor;
 uniform vec3 uEyePosition;
-uniform float uPointLight;
-uniform vec3 uPointLightPosition;
 uniform float uCenterLight;
+uniform vec3 uCenterColor;
 uniform float uTime;
 // Beat effects, drawn as an offset from the simulated position so they land
 // exactly on the beat and fade with Decay, without waiting for the spring.
@@ -636,11 +662,11 @@ void main()
 	// Light. Self Glow is how much each particle shines on its own; the
 	// lights add to that. Shading needs a surface, so key light and rim fade
 	// out for particles far from their spot (blown away, bursting, in
-	// mid-morph); point and centre light still reach those by distance. Lit
-	// parts take on the light colour; under white light they become a paler
-	// shade of the particle colour.
+	// mid-morph); the centre light still reaches those by distance. Lit
+	// parts take on each light's colour; under white light they become a
+	// paler shade of the particle colour.
 	vec3 ownColor = color * uSelfGlow;
-	if( uKeyLight > 0.0 || uRim > 0.0 || uPointLight > 0.0 || uCenterLight > 0.0 )
+	if( uKeyLight > 0.0 || uRim > 0.0 || uCenterLight > 0.0 )
 	{
 		// On the surface means near the spot the Morph fader blends to, or
 		// still near the mesh the fader is moving away from, so the light
@@ -657,29 +683,22 @@ void main()
 		float atBehind = ( 1.0 - smoothstep( 0.3, 0.8, distance( state.xyz, behind ) ) ) * ( 1.0 - atGoal );
 		vec3 n = normalize( goalNormal * ( atGoal + 1e-3 ) + behindNormal * atBehind + vec3( 0.0, 1e-6, 0.0 ) );
 		float onSurface = max( atGoal, atBehind );
-		vec3 tint = uLightColor * ( 0.35 + 0.65 * color );
+		vec3 tint = 0.35 + 0.65 * color;
 		vec3 lit = vec3( 0.0 );
 
 		// Key light: a little wrap-around, then the side turned away drops
 		// almost to black, for a hard light-to-shadow edge.
 		float key = uKeyLight * onSurface;
 		float facing = clamp( ( dot( n, uLightDirection ) + 0.2 ) / 1.2, 0.0, 1.0 );
-		lit += tint * ( 2.5 * facing * facing * key );
+		lit += uKeyColor * tint * ( 2.5 * facing * facing * key );
 
 		// Rim: the outline, where the surface turns away from the camera.
 		float edge = 1.0 - abs( dot( n, normalize( uEyePosition - position ) ) );
-		lit += tint * ( 3.0 * uRim * onSurface * edge * edge * edge );
-
-		// Point light: a pool of light that fades within about a shape's
-		// radius, and only lights surfaces facing it.
-		vec3 toLight = uPointLightPosition - position;
-		float near = exp( -2.5 * dot( toLight, toLight ) );
-		float towards = clamp( ( dot( n, normalize( toLight ) ) + 0.2 ) / 1.2, 0.0, 1.0 );
-		lit += tint * ( 8.0 * uPointLight * near * mix( 1.0, towards * towards, onSurface ) );
+		lit += uRimColor * tint * ( 3.0 * uRim * onSurface * edge * edge * edge );
 
 		// Centre light: a lamp inside the shape, as if in fog. It lights
 		// particles by their distance from the centre, whichever way they face.
-		lit += tint * ( 6.0 * uCenterLight * exp( -3.5 * dot( position, position ) ) );
+		lit += uCenterColor * tint * ( 6.0 * uCenterLight * exp( -3.5 * dot( position, position ) ) );
 
 		ownColor += lit;
 	}

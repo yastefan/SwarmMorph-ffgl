@@ -97,6 +97,8 @@ enum ParamID
 	PID_POINT_SIZE,
 	PID_SOFTNESS,
 	PID_STREAKS,
+	PID_TRAILS,
+	PID_TRAIL_ZOOM,
 	PID_BRIGHTNESS,
 	PID_COLOR_H,// hue, saturation, brightness and alpha in a row make one colour picker
 	PID_COLOR_S,
@@ -112,18 +114,24 @@ enum ParamID
 	PID_TWINKLE,
 	PID_DEPTH_FADE,
 
-	PID_LIGHT_H,
-	PID_LIGHT_S,
-	PID_LIGHT_V,
-	PID_LIGHT_A,
 	PID_SELF_GLOW,
 	PID_KEY_LIGHT,
+	PID_KEY_COLOR_H,// a colour picker per light
+	PID_KEY_COLOR_S,
+	PID_KEY_COLOR_V,
+	PID_KEY_COLOR_A,
 	PID_LIGHT_ANGLE,
 	PID_LIGHT_HEIGHT,
 	PID_RIM,
-	PID_POINT_LIGHT,
-	PID_LIGHT_ORBIT,
+	PID_RIM_COLOR_H,
+	PID_RIM_COLOR_S,
+	PID_RIM_COLOR_V,
+	PID_RIM_COLOR_A,
 	PID_CENTER_LIGHT,
+	PID_CENTER_COLOR_H,
+	PID_CENTER_COLOR_S,
+	PID_CENTER_COLOR_V,
+	PID_CENTER_COLOR_A,
 
 	PID_SPIN,
 	PID_ROTATE_X,
@@ -214,10 +222,14 @@ float CentredForce( float v, float maxForce )
 	float sign = centred < 0.0f ? -1.0f : 1.0f;
 	return sign * ( std::fabs( centred ) - deadZone ) / ( 1.0f - deadZone ) * maxForce;
 }
+
+// Trails: seconds until a tail has faded to about 5 %, 0.1 to 4.
+float TrailSeconds( float v ) { return 0.1f * std::pow( 40.0f, v ); }
+// Trail Zoom: growth of the trail image per second, as a log rate.
+float TrailZoomValue( float v ) { return CentredForce( v, 0.6f ); }
 float WindValue( float v ) { return CentredForce( v, 10.0f ); }
 float VortexValue( float v ) { return CentredForce( v, 6.0f ); }
 float RadialValue( float v ) { return CentredForce( v, 6.0f ); }
-float OrbitValue( float v ) { return CentredForce( v, 0.5f ); }// revolutions per second
 // Beat Rate and Auto Next options, as intervals in bars (4/4).
 const double kBeatIntervals[]  = { 0.0, 0.125, 0.25, 0.5, 1.0, 2.0 };
 float DecaySeconds( float v ) { return 0.06f + 0.9f * v * v; }
@@ -381,6 +393,10 @@ SwarmMorph::SwarmMorph()
 	SetParamInfof( PID_POINT_SIZE, "Point Size", FF_TYPE_STANDARD );
 	SetParamInfof( PID_SOFTNESS, "Softness", FF_TYPE_STANDARD );
 	SetParamInfof( PID_STREAKS, "Streaks", FF_TYPE_STANDARD );
+	// Trails: feedback, so the particles leave fading tails; Trail Zoom
+	// lets the tails grow outwards (or shrink inwards) like a tunnel.
+	SetParamInfof( PID_TRAILS, "Trails", FF_TYPE_STANDARD );
+	SetParamInfof( PID_TRAIL_ZOOM, "Trail Zoom", FF_TYPE_STANDARD );
 	SetParamInfof( PID_BRIGHTNESS, "Brightness", FF_TYPE_STANDARD );
 	// Resolume shows hue, saturation, brightness and alpha in a row as one
 	// colour picker (named as in the FFGL SDK's example); alpha sets how
@@ -406,22 +422,25 @@ SwarmMorph::SwarmMorph()
 		SetParamGroup( id, "Look" );
 
 	// Self Glow is the particles' own light in their colour. The other lights
-	// fall on the shape's surface: a key light from a fixed direction relative
-	// to the screen, a rim along the outline, a point light that circles the
-	// shape and a light at its centre.
-	SetParamInfof( PID_LIGHT_H, "Light Color", FF_TYPE_HUE );
-	SetParamInfof( PID_LIGHT_S, "Light Color_Sat", FF_TYPE_SATURATION );
-	SetParamInfof( PID_LIGHT_V, "Light Color_Bri", FF_TYPE_BRIGHTNESS );
-	SetParamInfof( PID_LIGHT_A, "Light Color_Alpha", FF_TYPE_ALPHA );
+	// fall on the shape's surface, each in its own colour: a key light from a
+	// fixed direction relative to the screen, a rim along the outline and a
+	// light at the centre.
+	auto lightColor = [ this ]( unsigned int first, const std::string& name ) {
+		SetParamInfof( first, name.c_str(), FF_TYPE_HUE );
+		SetParamInfof( first + 1, ( name + "_Sat" ).c_str(), FF_TYPE_SATURATION );
+		SetParamInfof( first + 2, ( name + "_Bri" ).c_str(), FF_TYPE_BRIGHTNESS );
+		SetParamInfof( first + 3, ( name + "_Alpha" ).c_str(), FF_TYPE_ALPHA );
+	};
 	SetParamInfof( PID_SELF_GLOW, "Self Glow", FF_TYPE_STANDARD );
 	SetParamInfof( PID_KEY_LIGHT, "Key Light", FF_TYPE_STANDARD );
+	lightColor( PID_KEY_COLOR_H, "Key Color" );
 	SetParamInfof( PID_LIGHT_ANGLE, "Light Angle", FF_TYPE_STANDARD );
 	SetParamInfof( PID_LIGHT_HEIGHT, "Light Height", FF_TYPE_STANDARD );
 	SetParamInfof( PID_RIM, "Rim", FF_TYPE_STANDARD );
-	SetParamInfof( PID_POINT_LIGHT, "Point Light", FF_TYPE_STANDARD );
-	SetParamInfof( PID_LIGHT_ORBIT, "Light Orbit", FF_TYPE_STANDARD );
+	lightColor( PID_RIM_COLOR_H, "Rim Color" );
 	SetParamInfof( PID_CENTER_LIGHT, "Center Light", FF_TYPE_STANDARD );
-	for( unsigned int id = PID_LIGHT_H; id <= PID_CENTER_LIGHT; ++id )
+	lightColor( PID_CENTER_COLOR_H, "Center Color" );
+	for( unsigned int id = PID_SELF_GLOW; id <= PID_CENTER_COLOR_A; ++id )
 		SetParamGroup( id, "Light" );
 
 	SetParamInfof( PID_SPIN, "Spin", FF_TYPE_STANDARD );
@@ -475,6 +494,11 @@ bool SwarmMorph::CreateGLResources()
 		!streakShader.Compile( swarm::RenderShaderSource( swarm::kRenderVSBody, true ), swarm::RenderShaderSource( swarm::kRenderFSBody, true ) ) )
 	{
 		FFGLLog::LogToHost( "SwarmMorph: render shader failed to compile" );
+		return false;
+	}
+	if( !trailShader.Compile( swarm::kFullscreenVS, swarm::kTrailFS ) )
+	{
+		FFGLLog::LogToHost( "SwarmMorph: trail shader failed to compile" );
 		return false;
 	}
 	if( !skinShader.Compile( swarm::kFullscreenVS, swarm::kSkinFS ) )
@@ -569,7 +593,9 @@ void SwarmMorph::ReleaseGLResources()
 	updateShader.FreeGLResources();
 	renderShader.FreeGLResources();
 	streakShader.FreeGLResources();
+	trailShader.FreeGLResources();
 	skinShader.FreeGLResources();
+	ReleaseTrails();
 	for( StateBuffer& buffer : state )
 	{
 		glDeleteFramebuffers( 1, &buffer.fbo );
@@ -913,14 +939,16 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	bool started = lastTime < 0.0 || deltaTime > 0.3f || deltaTime < -0.001f;
 	if( started && spawnOnStart )
 		spawnPending = true;
+	if( started )
+		trailsReset = true;
 	lastTime  = hostTime;
 	// Big jumps (clip retriggered, host stalled) would make the springs explode.
 	if( !std::isfinite( deltaTime ) )
 		deltaTime = 0.0f;
 	deltaTime = std::min( std::max( deltaTime, 0.0f ), 1.0f / 20.0f );
+	frameDelta = deltaTime;
 	simTime += deltaTime;
 	spinAngle += SpinValue( spin ) * 2.0f * kPi * deltaTime;
-	orbitAngle += OrbitValue( lightOrbit ) * 2.0f * kPi * deltaTime;
 	pathTravel = std::fmod( pathTravel + deltaTime * PathSpeedValue( pathSpeed ), 1.0f );
 
 	UploadFinishedLoads();
@@ -941,7 +969,7 @@ FFResult SwarmMorph::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	GLuint mesh2Targets = targets, mesh2Normals = normals;
 	if( slots[ 1 ].loaded )
 		SlotTextures( 1, mesh2Targets, mesh2Normals );
-	Render( targets, normals, mesh2Targets, mesh2Normals, morphAmount );
+	Render( targets, normals, mesh2Targets, mesh2Normals, morphAmount, pGL->HostFBO );
 	return FF_SUCCESS;
 }
 
@@ -1048,7 +1076,7 @@ SwarmMorph::Camera SwarmMorph::CurrentCamera() const
 	return camera;
 }
 
-void SwarmMorph::Render( GLuint targets, GLuint normals, GLuint mesh2Targets, GLuint mesh2Normals, float morphAmount )
+void SwarmMorph::Render( GLuint targets, GLuint normals, GLuint mesh2Targets, GLuint mesh2Normals, float morphAmount, GLuint hostFBO )
 {
 	float height = static_cast< float >( std::max< GLuint >( currentViewport.height, 1 ) );
 
@@ -1061,6 +1089,15 @@ void SwarmMorph::Render( GLuint targets, GLuint normals, GLuint mesh2Targets, GL
 	// A wider lens shows the shape smaller, so points shrink with it.
 	float pointScale = PointSizeValue( pointSize ) * ( height / 1080.0f ) * std::tan( kFovY * 0.5f ) / std::tan( camera.fovY * 0.5f );
 
+	// With Trails, the particles go into a buffer of their own first.
+	bool trailsOn = trails > 0.0f && PrepareTrails();
+	if( !trailsOn )
+		trailsReset = true;
+	if( trailsOn )
+	{
+		glBindFramebuffer( GL_FRAMEBUFFER, trailFBOs[ 0 ] );
+		glViewport( 0, 0, trailWidth, trailHeight );
+	}
 	glClear( GL_COLOR_BUFFER_BIT );
 
 	bool streaks           = streakLength > 0.0f;
@@ -1128,6 +1165,85 @@ void SwarmMorph::Render( GLuint targets, GLuint normals, GLuint mesh2Targets, GL
 	glDisable( GL_BLEND );
 	previousMVP    = mvp;
 	hasPreviousMVP = true;
+	if( trailsOn )
+		CompositeTrails( hostFBO );
+}
+
+bool SwarmMorph::PrepareTrails()
+{
+	GLuint width = std::max< GLuint >( currentViewport.width, 1 ), height = std::max< GLuint >( currentViewport.height, 1 );
+	if( trailFBOs[ 0 ] != 0 && width == trailWidth && height == trailHeight )
+		return true;
+	ReleaseTrails();
+	for( int i = 0; i < 3; ++i )
+	{
+		// Half floats keep the long, faint end of a tail smooth.
+		trailTextures[ i ] = CreateTexture( GL_RGBA16F, GL_RGBA, GL_FLOAT, static_cast< int >( width ), static_cast< int >( height ), nullptr );
+		{
+			Scoped2DTextureBinding binding( trailTextures[ i ] );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		}
+		glGenFramebuffers( 1, &trailFBOs[ i ] );
+		ScopedFBOBinding fboBinding( trailFBOs[ i ], ScopedFBOBinding::RB_REVERT );
+		glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, trailTextures[ i ], 0 );
+		if( glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
+		{
+			FFGLLog::LogToHost( "SwarmMorph: trail buffer incomplete; Trails disabled" );
+			ReleaseTrails();
+			return false;
+		}
+	}
+	trailWidth  = width;
+	trailHeight = height;
+	trailsReset = true;
+	return true;
+}
+
+void SwarmMorph::ReleaseTrails()
+{
+	glDeleteFramebuffers( 3, trailFBOs );
+	glDeleteTextures( 3, trailTextures );
+	for( int i = 0; i < 3; ++i )
+		trailFBOs[ i ] = trailTextures[ i ] = 0;
+	trailWidth = trailHeight = 0;
+}
+
+void SwarmMorph::CompositeTrails( GLuint hostFBO )
+{
+	ScopedShaderBinding shaderBinding( trailShader.GetGLID() );
+	ScopedVAOBinding vaoBinding( emptyVAO );
+	trailShader.Set( "uCurrent", 0 );
+	trailShader.Set( "uPrevious", 1 );
+
+	// The new particles over the faded last trail image, into the other
+	// trail buffer. Fading per second keeps the length the same at any
+	// frame rate.
+	int back = 3 - trailFront;
+	glBindFramebuffer( GL_FRAMEBUFFER, trailFBOs[ back ] );
+	glViewport( 0, 0, trailWidth, trailHeight );
+	trailShader.Set( "uOrigin", 0.0f, 0.0f );
+	trailShader.Set( "uSize", static_cast< float >( trailWidth ), static_cast< float >( trailHeight ) );
+	trailShader.Set( "uFade", trailsReset ? 0.0f : std::exp( -3.0f * frameDelta / TrailSeconds( trails ) ) );
+	trailShader.Set( "uZoom", std::exp( TrailZoomValue( trailZoom ) * frameDelta ) );
+	{
+		ScopedTextureUnits textures( { trailTextures[ 0 ], trailTextures[ trailFront ] } );
+		glDrawArrays( GL_TRIANGLES, 0, 3 );
+	}
+
+	// Then the result to the host.
+	glBindFramebuffer( GL_FRAMEBUFFER, hostFBO );
+	glViewport( currentViewport.x, currentViewport.y, currentViewport.width, currentViewport.height );
+	trailShader.Set( "uOrigin", static_cast< float >( currentViewport.x ), static_cast< float >( currentViewport.y ) );
+	trailShader.Set( "uSize", static_cast< float >( trailWidth ), static_cast< float >( trailHeight ) );
+	trailShader.Set( "uFade", 0.0f );
+	trailShader.Set( "uZoom", 1.0f );
+	{
+		ScopedTextureUnits textures( { trailTextures[ back ], trailTextures[ back ] } );
+		glDrawArrays( GL_TRIANGLES, 0, 3 );
+	}
+	trailFront  = back;
+	trailsReset = false;
 }
 
 void SwarmMorph::SetAnchorUniforms( ffglex::FFGLShader& shader ) const
@@ -1155,29 +1271,23 @@ void SwarmMorph::SetLightUniforms( ffglex::FFGLShader& shader, const swarm::Mat4
 	toShape( key, direction );
 	shader.Set( "uLightDirection", direction[ 0 ], direction[ 1 ], direction[ 2 ] );
 
-	// The point light circles the shape at the key light's height, starting
-	// from the key light's side.
-	const float orbitRadius = 1.3f;
-	float around      = angle + orbitAngle;
-	float orbit[ 3 ]  = { std::sin( around ) * std::cos( elevation ) * orbitRadius, std::sin( elevation ) * orbitRadius,
-						  std::cos( around ) * std::cos( elevation ) * orbitRadius };
-	float lightPosition[ 3 ];
-	toShape( orbit, lightPosition );
-	shader.Set( "uPointLightPosition", lightPosition[ 0 ], lightPosition[ 1 ], lightPosition[ 2 ] );
-
 	// The camera in the shape's space, for the rim.
 	float translation[ 3 ] = { -view.m[ 12 ], -view.m[ 13 ], -view.m[ 14 ] };
 	float eye[ 3 ];
 	toShape( translation, eye );
 	shader.Set( "uEyePosition", eye[ 0 ], eye[ 1 ], eye[ 2 ] );
 
-	float rgb[ 3 ];
-	HsvToRgb( lightH, lightS, lightV * lightA, rgb );
-	shader.Set( "uLightColor", rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
+	auto setColor = [ &shader ]( const char* name, const float hsva[ 4 ] ) {
+		float rgb[ 3 ];
+		HsvToRgb( hsva[ 0 ], hsva[ 1 ], hsva[ 2 ] * hsva[ 3 ], rgb );
+		shader.Set( name, rgb[ 0 ], rgb[ 1 ], rgb[ 2 ] );
+	};
+	setColor( "uKeyColor", keyColor );
+	setColor( "uRimColor", rimColor );
+	setColor( "uCenterColor", centerColor );
 	shader.Set( "uSelfGlow", selfGlow );
 	shader.Set( "uKeyLight", keyLight );
 	shader.Set( "uRim", rim );
-	shader.Set( "uPointLight", pointLight );
 	shader.Set( "uCenterLight", centerLight );
 }
 
@@ -1250,6 +1360,8 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_COLOR2_A: color2A = value; break;
 	case PID_SOFTNESS: softness = value; break;
 	case PID_STREAKS: streakLength = value; break;
+	case PID_TRAILS: trails = value; break;
+	case PID_TRAIL_ZOOM: trailZoom = value; break;
 	case PID_COLOR_S: colorS = value; break;
 	case PID_COLOR_V: colorV = value; break;
 	case PID_HEAT: heat = value; break;
@@ -1261,17 +1373,23 @@ FFResult SwarmMorph::SetFloatParameter( unsigned int index, float value )
 	case PID_COLOR_MIX: colorMix = value; break;
 	case PID_TWINKLE: twinkle = value; break;
 	case PID_DEPTH_FADE: depthFade = value; break;
-	case PID_LIGHT_H: lightH = value; break;
-	case PID_LIGHT_S: lightS = value; break;
-	case PID_LIGHT_V: lightV = value; break;
-	case PID_LIGHT_A: lightA = value; break;
+	case PID_KEY_COLOR_H:
+	case PID_KEY_COLOR_S:
+	case PID_KEY_COLOR_V:
+	case PID_KEY_COLOR_A: keyColor[ index - PID_KEY_COLOR_H ] = value; break;
+	case PID_RIM_COLOR_H:
+	case PID_RIM_COLOR_S:
+	case PID_RIM_COLOR_V:
+	case PID_RIM_COLOR_A: rimColor[ index - PID_RIM_COLOR_H ] = value; break;
+	case PID_CENTER_COLOR_H:
+	case PID_CENTER_COLOR_S:
+	case PID_CENTER_COLOR_V:
+	case PID_CENTER_COLOR_A: centerColor[ index - PID_CENTER_COLOR_H ] = value; break;
 	case PID_SELF_GLOW: selfGlow = value; break;
 	case PID_KEY_LIGHT: keyLight = value; break;
 	case PID_LIGHT_ANGLE: lightAngle = value; break;
 	case PID_LIGHT_HEIGHT: lightHeight = value; break;
 	case PID_RIM: rim = value; break;
-	case PID_POINT_LIGHT: pointLight = value; break;
-	case PID_LIGHT_ORBIT: lightOrbit = value; break;
 	case PID_CENTER_LIGHT: centerLight = value; break;
 	case PID_SPIN: spin = value; break;
 	case PID_ROTATE_X: rotateX = value; break;
@@ -1353,6 +1471,8 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_COLOR2_A: return color2A;
 	case PID_SOFTNESS: return softness;
 	case PID_STREAKS: return streakLength;
+	case PID_TRAILS: return trails;
+	case PID_TRAIL_ZOOM: return trailZoom;
 	case PID_COLOR_S: return colorS;
 	case PID_COLOR_V: return colorV;
 	case PID_HEAT: return heat;
@@ -1364,17 +1484,23 @@ float SwarmMorph::GetFloatParameter( unsigned int index )
 	case PID_COLOR_MIX: return colorMix;
 	case PID_TWINKLE: return twinkle;
 	case PID_DEPTH_FADE: return depthFade;
-	case PID_LIGHT_H: return lightH;
-	case PID_LIGHT_S: return lightS;
-	case PID_LIGHT_V: return lightV;
-	case PID_LIGHT_A: return lightA;
+	case PID_KEY_COLOR_H:
+	case PID_KEY_COLOR_S:
+	case PID_KEY_COLOR_V:
+	case PID_KEY_COLOR_A: return keyColor[ index - PID_KEY_COLOR_H ];
+	case PID_RIM_COLOR_H:
+	case PID_RIM_COLOR_S:
+	case PID_RIM_COLOR_V:
+	case PID_RIM_COLOR_A: return rimColor[ index - PID_RIM_COLOR_H ];
+	case PID_CENTER_COLOR_H:
+	case PID_CENTER_COLOR_S:
+	case PID_CENTER_COLOR_V:
+	case PID_CENTER_COLOR_A: return centerColor[ index - PID_CENTER_COLOR_H ];
 	case PID_SELF_GLOW: return selfGlow;
 	case PID_KEY_LIGHT: return keyLight;
 	case PID_LIGHT_ANGLE: return lightAngle;
 	case PID_LIGHT_HEIGHT: return lightHeight;
 	case PID_RIM: return rim;
-	case PID_POINT_LIGHT: return pointLight;
-	case PID_LIGHT_ORBIT: return lightOrbit;
 	case PID_CENTER_LIGHT: return centerLight;
 	case PID_SPIN: return spin;
 	case PID_ROTATE_X: return rotateX;
@@ -1452,10 +1578,15 @@ char* SwarmMorph::GetParameterDisplay( unsigned int index )
 			return const_cast< char* >( "off" );
 		snprintf( buffer, sizeof( buffer ), "%.1fx", StreakValue( streakLength ) );
 		return buffer;
+	case PID_TRAILS:
+		if( trails <= 0.0f )
+			return const_cast< char* >( "off" );
+		snprintf( buffer, sizeof( buffer ), "%.2f s", TrailSeconds( trails ) );
+		return buffer;
+	case PID_TRAIL_ZOOM: snprintf( buffer, sizeof( buffer ), "%+.0f%%/s", ( std::exp( TrailZoomValue( trailZoom ) ) - 1.0f ) * 100.0f ); return buffer;
 	case PID_SELF_GLOW: snprintf( buffer, sizeof( buffer ), "%.0f%%", selfGlow * 100.0f ); return buffer;
 	case PID_LIGHT_ANGLE: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( lightAngle ) ); return buffer;
 	case PID_LIGHT_HEIGHT: snprintf( buffer, sizeof( buffer ), "%.0f deg", HeightValue( lightHeight ) ); return buffer;
-	case PID_LIGHT_ORBIT: snprintf( buffer, sizeof( buffer ), "%+.2f rps", OrbitValue( lightOrbit ) ); return buffer;
 	case PID_SPIN: snprintf( buffer, sizeof( buffer ), "%.2f rps", SpinValue( spin ) ); return buffer;
 	case PID_ROTATE_X: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( rotateX ) ); return buffer;
 	case PID_ROTATE_Y: snprintf( buffer, sizeof( buffer ), "%.0f deg", AngleValue( rotateY ) ); return buffer;

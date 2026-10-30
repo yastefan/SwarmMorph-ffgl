@@ -102,7 +102,10 @@ private:
 	// Both meshes and the Morph between them, for the beat effects and the
 	// light; mesh2* is Mesh 2 whenever it is loaded, even at Morph 0, so the
 	// light hands over smoothly when the fader moves.
-	void Render( GLuint targets, GLuint normals, GLuint mesh2Targets, GLuint mesh2Normals, float morphAmount );
+	void Render( GLuint targets, GLuint normals, GLuint mesh2Targets, GLuint mesh2Normals, float morphAmount, GLuint hostFBO );
+	bool PrepareTrails();
+	void ReleaseTrails();
+	void CompositeTrails( GLuint hostFBO );
 	void SetAnchorUniforms( ffglex::FFGLShader& shader ) const;
 	void SlotTextures( int slot, GLuint& targets, GLuint& normals ) const;
 	void SetLightUniforms( ffglex::FFGLShader& shader, const swarm::Mat4& view ) const;
@@ -131,6 +134,16 @@ private:
 	ffglex::FFGLShader skinShader;
 	ffglex::FFGLShader renderShader;
 	ffglex::FFGLShader streakShader;// renderShader drawing capsules from last frame's position
+	ffglex::FFGLShader trailShader;
+	// Trails: the particles are drawn into [0], then laid over the last trail
+	// image, which ping-pongs between [1] and [2].
+	GLuint trailTextures[ 3 ] = {};
+	GLuint trailFBOs[ 3 ]     = {};
+	GLuint trailWidth         = 0;
+	GLuint trailHeight        = 0;
+	int trailFront            = 1;// the trail image of the last frame
+	bool trailsReset          = true;// start from black: first frame, clip start, Trails just turned on
+	float frameDelta          = 0.0f;// real seconds since the last frame
 
 	// Parameters, stored as the host's normalised values.
 	float morph          = 0.0f;
@@ -153,6 +166,8 @@ private:
 	float color2A        = 1.0f;
 	float softness       = 0.45f;// matches the earlier fixed falloff
 	float streakLength   = 0.0f; // 0 = round points
+	float trails         = 0.0f; // 0 = off
+	float trailZoom      = 0.5f; // still
 	float heat           = 0.4f;
 	float brightness     = 0.2f;
 	float color2H        = 0.059f;// orange
@@ -161,18 +176,15 @@ private:
 	int colorMode        = 0;// 0 speed, 1 height, 2 depth, 3 random
 	float colorMix       = 0.0f;
 	float twinkle        = 0.0f;
-	float lightH         = 0.0f;// white
-	float lightS         = 0.0f;
-	float lightV         = 1.0f;
-	float lightA         = 1.0f;
 	float selfGlow       = 1.0f;// full own colour, as before
 	float keyLight       = 0.0f;
 	float lightAngle     = 0.333f;// -60 deg: from the left, a little in front
 	float lightHeight    = 0.667f;// 30 deg above
 	float rim            = 0.0f;
-	float pointLight     = 0.0f;
-	float lightOrbit     = 0.5f;// still
 	float centerLight    = 0.0f;
+	float keyColor[ 4 ]    = { 0.0f, 0.0f, 1.0f, 1.0f };// hue, saturation, brightness, alpha: white
+	float rimColor[ 4 ]    = { 0.0f, 0.0f, 1.0f, 1.0f };
+	float centerColor[ 4 ] = { 0.0f, 0.0f, 1.0f, 1.0f };
 	float depthFade      = 0.0f;
 	float spin           = 0.5f;// still
 	float rotateX        = 0.5f;
@@ -219,7 +231,6 @@ private:
 	float noiseTime  = 0.0f;// advances with Flow Speed
 	float buzzTime   = 0.0f;// advances with Buzz Speed
 	float spinAngle  = 0.0f;
-	float orbitAngle = 0.0f;// Light Orbit
 	float pathTravel = 0.0f;// added to Path Position by Path Speed
 
 	// Beat clock and the current beat's envelope.
